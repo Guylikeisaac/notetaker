@@ -1,0 +1,12 @@
+{
+  "name": "notetaker",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @notetaker/web dev",
+    "dev:worker": "pnpm --filter @notetaker/worker dev",
+    "db:push": "pnpm --filter @notetaker/db push",
+    "bot:login": "pnpm --filter @notetaker/worker login",
+    "bot:connect": "pnpm --filter @notetaker/worker connect"
+  }
+}

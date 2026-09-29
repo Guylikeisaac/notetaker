@@ -1,0 +1,22 @@
+{
+  "name": "@notetaker/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "start": "tsx src/index.ts",
+    "login": "tsx --env-file=../../.env src/login.ts",
+    "connect": "tsx --env-file=../../.env src/connect.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@notetaker/db": "workspace:*",
+    "playwright": "^1.63.0",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
