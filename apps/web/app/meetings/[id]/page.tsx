@@ -2,15 +2,15 @@ import { asc, db, eq, transcriptSegments } from "@notetaker/db";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LocalTime } from "@/components/local-time";
-import { requireUserId, ownedMeeting } from "@/lib/user";
+import { requireUser, visibleMeeting } from "@/lib/user";
 import { LiveMeeting, type Segment } from "./live-meeting";
 
 export const dynamic = "force-dynamic";
 
 export default async function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireUserId();
+  const user = await requireUser();
   const { id } = await params;
-  const meeting = await ownedMeeting(userId, id);
+  const meeting = await visibleMeeting(user, id);
   if (!meeting) notFound();
 
   const rows = await db

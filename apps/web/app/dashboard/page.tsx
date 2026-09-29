@@ -1,10 +1,9 @@
-import { and, botAccounts, db, desc, eq, gte, inArray, meetings, type Meeting } from "@notetaker/db";
+import { and, botAccounts, canSeeMeeting, db, desc, gte, inArray, meetings, type Meeting } from "@notetaker/db";
 import Link from "next/link";
-import { auth } from "@/auth";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LocalTime } from "@/components/local-time";
 import { StatusBadge } from "@/components/status-badge";
-import { requireUserId } from "@/lib/user";
+import { requireUser } from "@/lib/user";
 import { disconnectBot, restoreMeeting, sendBotNow, signOutAction, stopBot } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -69,22 +68,23 @@ function List({ title, items, empty, action }: {
 }
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ bot_error?: string }> }) {
-  const userId = await requireUserId();
-  const session = await auth();
+  const user = await requireUser();
+  const mine = canSeeMeeting(user.id, user.email);
   const { bot_error } = await searchParams;
 
-  const [bot] = await db.select().from(botAccounts).where(eq(botAccounts.userId, userId));
+  // One company-wide bot.
+  const [bot] = await db.select().from(botAccounts).limit(1);
   const now = new Date();
   const [live, upcoming, past] = await Promise.all([
     db.select().from(meetings)
-      .where(and(eq(meetings.userId, userId), inArray(meetings.status, [...LIVE])))
+      .where(and(mine, inArray(meetings.status, [...LIVE])))
       .orderBy(meetings.startsAt),
     db.select().from(meetings)
-      .where(and(eq(meetings.userId, userId), inArray(meetings.status, ["scheduled", "cancelled"]), gte(meetings.endsAt, now)))
+      .where(and(mine, inArray(meetings.status, ["scheduled", "cancelled"]), gte(meetings.endsAt, now)))
       .orderBy(meetings.startsAt)
       .limit(20),
     db.select().from(meetings)
-      .where(and(eq(meetings.userId, userId), inArray(meetings.status, ["completed", "failed"])))
+      .where(and(mine, inArray(meetings.status, ["completed", "failed"])))
       .orderBy(desc(meetings.startsAt))
       .limit(50),
   ]);
@@ -97,7 +97,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Notetaker</h1>
         <form action={signOutAction} className="flex items-center gap-3 text-sm text-zinc-500">
-          <span>{session?.user?.email}</span>
+          <span>{user.email}</span>
           <button className="hover:text-zinc-900 dark:hover:text-white">Sign out</button>
         </form>
       </header>
@@ -109,15 +109,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         )}
         <ol className="space-y-4">
           <Step n={1} done title="Sign in with Google" />
-          <Step n={2} done={!!bot} title="Connect the bot's Google account">
+          <Step n={2} done={!!bot} title="Company bot connected">
             {bot ? (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span>
                   Connected as <span className="font-medium text-zinc-900 dark:text-zinc-100">{bot.email}</span>
                 </span>
-                <form action={disconnectBot}>
-                  <button className="text-red-600 hover:underline">Disconnect</button>
-                </form>
+                {user.isAdmin && (
+                  <form action={disconnectBot}>
+                    <button className="text-red-600 hover:underline">Disconnect</button>
+                  </form>
+                )}
                 {bot.lastSyncError ? (
                   <span className="w-full text-red-600">Calendar sync failing: {bot.lastSyncError}</span>
                 ) : bot.lastSyncedAt ? (
@@ -128,9 +130,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                   <span className="w-full">Waiting for the worker's first calendar check…</span>
                 )}
               </div>
-            ) : (
+            ) : user.isAdmin ? (
               <>
-                <p>Use a separate Google account that exists only to attend meetings.</p>
+                <p>Use a separate Google account that exists only to attend meetings. It's shared by the whole company.</p>
                 <a
                   href="/api/bot/connect"
                   className="mt-2 inline-block rounded-lg bg-zinc-900 px-4 py-2 font-medium text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"
@@ -138,13 +140,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                   Connect bot account
                 </a>
               </>
+            ) : (
+              <p>An admin hasn't connected the company bot yet.</p>
             )}
           </Step>
           <Step n={3} done={hasMeetings} title="Invite the bot to a Google Meet">
             {bot ? (
               <p>
                 Add <span className="font-medium text-zinc-900 dark:text-zinc-100">{bot.email}</span> as a guest on any
-                calendar event with a Meet link, or use <span className="font-medium text-zinc-900 dark:text-zinc-100">Add people</span> inside a running Meet. It joins on its own, and the meeting shows up below.
+                calendar event with a Meet link, or use <span className="font-medium text-zinc-900 dark:text-zinc-100">Add people</span> inside a running Meet. It joins on its own, and everyone on the invite sees the notes here.
               </p>
             ) : (
               <p>Once the bot is connected, invite its email address to your meetings.</p>
@@ -158,7 +162,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <List
         title="Upcoming"
         items={upcoming}
-        empty="No upcoming meetings with the bot invited."
+        empty="No upcoming meetings with you and the bot invited."
         action={(m) =>
           m.status === "scheduled" ? (
             <form action={stopBot.bind(null, m.id)}>

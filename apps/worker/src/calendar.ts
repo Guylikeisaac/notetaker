@@ -1,4 +1,4 @@
-import { and, botAccounts, db, eq, meetings, rawSql, type BotAccount } from "@notetaker/db";
+import { and, botAccounts, db, eq, meetings, rawSql, setAttendees, type BotAccount } from "@notetaker/db";
 import { decrypt } from "@notetaker/db/crypto";
 import { config } from "./config";
 import { log } from "./log";
@@ -13,7 +13,9 @@ type GoogleEvent = {
   conferenceData?: { entryPoints?: { entryPointType: string; uri: string }[] };
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
-  attendees?: { self?: boolean; responseStatus?: string }[];
+  attendees?: { email?: string; self?: boolean; responseStatus?: string }[];
+  organizer?: { email?: string };
+  creator?: { email?: string };
 };
 
 const MEET_RE = /https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i;
@@ -78,11 +80,7 @@ async function syncBot(bot: BotAccount): Promise<void> {
         .update(meetings)
         .set({ status: "cancelled", updatedAt: new Date() })
         .where(
-          and(
-            eq(meetings.userId, bot.userId),
-            eq(meetings.calendarEventId, e.id),
-            eq(meetings.status, "scheduled"),
-          ),
+          and(eq(meetings.calendarEventId, e.id), eq(meetings.status, "scheduled")),
         );
       continue;
     }
@@ -99,13 +97,19 @@ async function syncBot(bot: BotAccount): Promise<void> {
     };
     await db
       .insert(meetings)
-      .values({ userId: bot.userId, calendarEventId: e.id, ...values })
+      .values({ calendarEventId: e.id, ...values })
       .onConflictDoUpdate({
-        target: [meetings.userId, meetings.calendarEventId],
+        target: meetings.calendarEventId,
         set: { ...values, updatedAt: new Date() },
         // Never rewrite a meeting the bot has already started on.
         setWhere: rawSql`${meetings.status} = 'scheduled'`,
       });
+    const [row] = await db.select({ id: meetings.id }).from(meetings).where(eq(meetings.calendarEventId, e.id));
+    if (row) {
+      // Everyone on the invite can see this meeting's notes in the app.
+      const guests = (e.attendees ?? []).filter((a) => !a.self).map((a) => a.email);
+      await setAttendees(db, row.id, [...guests, e.organizer?.email, e.creator?.email].filter((m) => m !== bot.email));
+    }
     upserted++;
   }
 

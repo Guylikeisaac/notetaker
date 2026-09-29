@@ -1,7 +1,6 @@
 import { and, asc, db, eq, gt, meetings, transcriptSegments } from "@notetaker/db";
 import type { NextRequest } from "next/server";
-import { auth } from "@/auth";
-import { ownedMeeting } from "@/lib/user";
+import { getUser, visibleMeeting } from "@/lib/user";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -15,11 +14,10 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 // Steps 9-10: pushes new transcript segments and meeting status/notes changes
 // to the live meeting page. The worker writes to Postgres; this polls it.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  const userId = session?.user?.id;
-  if (!userId) return new Response("Unauthorized", { status: 401 });
+  const user = await getUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const { id } = await params;
-  if (!(await ownedMeeting(userId, id))) return new Response("Not found", { status: 404 });
+  if (!(await visibleMeeting(user, id))) return new Response("Not found", { status: 404 });
 
   let lastId = Number(req.headers.get("last-event-id") ?? req.nextUrl.searchParams.get("after") ?? 0) || 0;
   let lastUpdatedAt = "";

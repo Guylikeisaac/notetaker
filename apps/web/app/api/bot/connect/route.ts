@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
+import { getUser } from "@/lib/user";
 
 // Step 2: OAuth consent for the *bot's* Google account (not the user's own).
 // Offline access to its calendar lets the worker see the Meet invites it gets.
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.redirect(new URL("/", req.url));
+  const user = await getUser();
+  if (!user) return NextResponse.redirect(new URL("/", req.url));
+  if (!user.isAdmin) return NextResponse.redirect(new URL("/dashboard", req.url));
 
   const state = randomBytes(24).toString("base64url");
   (await cookies()).set("bot_oauth_state", state, {

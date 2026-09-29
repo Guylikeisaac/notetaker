@@ -5,6 +5,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -19,15 +20,14 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// The Google account the bot signs in as. Its calendar is polled for Meet
-// invites, and its browser profile (see apps/worker login script) joins calls.
+// The company's shared bot Google account. Its calendar and inbox are polled
+// for Meet invites, and its browser profile (see apps/worker login script)
+// joins calls. There is normally exactly one row.
 export const botAccounts = pgTable("bot_accounts", {
   id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .unique()
-    .references(() => users.id, { onDelete: "cascade" }),
-  email: text("email").notNull(),
+  // Admin who connected it; informational only.
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  email: text("email").notNull().unique(),
   refreshTokenEnc: text("refresh_token_enc").notNull(),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   lastSyncError: text("last_sync_error"),
@@ -65,9 +65,9 @@ export const meetings = pgTable(
   "meetings",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    // Who sent the bot via the dashboard; null for calendar/email invites.
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    // Google Calendar event id, `gmail-<messageId>` or `manual-<uuid>`.
     calendarEventId: text("calendar_event_id").notNull(),
     title: text("title").notNull(),
     meetUrl: text("meet_url").notNull(),
@@ -84,9 +84,22 @@ export const meetings = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("meetings_user_event_idx").on(t.userId, t.calendarEventId),
+    uniqueIndex("meetings_event_idx").on(t.calendarEventId),
     index("meetings_status_starts_idx").on(t.status, t.startsAt),
   ],
+);
+
+// Who may see a meeting: its calendar guests and organizer, the person who
+// sent a Meet "Add people" invite, or whoever sent the bot from the dashboard.
+export const meetingAttendees = pgTable(
+  "meeting_attendees",
+  {
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.meetingId, t.email] }), index("attendees_email_idx").on(t.email)],
 );
 
 export const transcriptSegments = pgTable(

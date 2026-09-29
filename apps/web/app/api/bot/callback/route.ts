@@ -1,8 +1,8 @@
-import { botAccounts, db, users, eq } from "@notetaker/db";
+import { botAccounts, db, ne } from "@notetaker/db";
 import { encrypt } from "@notetaker/db/crypto";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
+import { getUser } from "@/lib/user";
 
 function back(req: NextRequest, error?: string) {
   const url = new URL("/dashboard", req.url);
@@ -11,9 +11,9 @@ function back(req: NextRequest, error?: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  const userId = session?.user?.id;
-  if (!userId) return NextResponse.redirect(new URL("/", req.url));
+  const user = await getUser();
+  if (!user) return NextResponse.redirect(new URL("/", req.url));
+  if (!user.isAdmin) return back(req, "Only admins can connect the company bot.");
 
   const jar = await cookies();
   const expected = jar.get("bot_oauth_state")?.value;
@@ -40,8 +40,8 @@ export async function GET(req: NextRequest) {
   const tokens = (await tokenRes.json()) as { access_token?: string; refresh_token?: string; scope?: string };
   if (!tokenRes.ok || !tokens.access_token) return back(req, "Google rejected the connection.");
   if (!tokens.refresh_token) return back(req, "Google did not grant offline access. Please try again.");
-  if (!tokens.scope?.includes("calendar.readonly")) {
-    return back(req, "Calendar access is required so the bot can see its meeting invites.");
+  if (!tokens.scope?.includes("calendar.readonly") || !tokens.scope?.includes("gmail.readonly")) {
+    return back(req, "Allow both calendar and email access so the bot can see its meeting invites.");
   }
 
   const infoRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
@@ -50,18 +50,19 @@ export async function GET(req: NextRequest) {
   const info = (await infoRes.json()) as { email?: string };
   if (!info.email) return back(req, "Could not read the bot account's email address.");
 
-  const [owner] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId));
-  if (owner?.email.toLowerCase() === info.email.toLowerCase()) {
+  if (user.email.toLowerCase() === info.email.toLowerCase()) {
     return back(req, "Use a separate Google account for the bot, not the one you signed in with.");
   }
 
   const refreshTokenEnc = encrypt(tokens.refresh_token);
+  // One company-wide bot: replace any other account.
+  await db.delete(botAccounts).where(ne(botAccounts.email, info.email));
   await db
     .insert(botAccounts)
-    .values({ userId, email: info.email, refreshTokenEnc })
+    .values({ userId: user.id, email: info.email, refreshTokenEnc })
     .onConflictDoUpdate({
-      target: botAccounts.userId,
-      set: { email: info.email, refreshTokenEnc, connectedAt: new Date(), lastSyncError: null },
+      target: botAccounts.email,
+      set: { userId: user.id, refreshTokenEnc, connectedAt: new Date(), lastSyncError: null },
     });
 
   return back(req);

@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { botAccounts, db, eq, users } from "@notetaker/db";
+import { botAccounts, db, eq, ne, users } from "@notetaker/db";
 import { encrypt } from "@notetaker/db/crypto";
 import { chromium } from "playwright";
 
@@ -97,14 +97,16 @@ try {
   }
 
   const refreshTokenEnc = encrypt(tokens.refresh_token);
+  // One company-wide bot: replace any other account.
+  await db.delete(botAccounts).where(ne(botAccounts.email, info.email));
   await db
     .insert(botAccounts)
     .values({ userId: user.id, email: info.email, refreshTokenEnc })
     .onConflictDoUpdate({
-      target: botAccounts.userId,
-      set: { email: info.email, refreshTokenEnc, connectedAt: new Date(), lastSyncError: null },
+      target: botAccounts.email,
+      set: { userId: user.id, refreshTokenEnc, connectedAt: new Date(), lastSyncError: null },
     });
-  console.log(`Connected ${botEmail} as the bot for ${userEmail}.`);
+  console.log(`Connected ${botEmail} as the company bot (by ${userEmail}).`);
 } catch (err) {
   console.error(`Failed: ${err instanceof Error ? err.message : err}`);
   process.exitCode = 1;

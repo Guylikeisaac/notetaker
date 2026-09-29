@@ -13,3 +13,4 @@ if (process.env.NODE_ENV !== "production") globalForDb.__notetakerSql = sql;
 export const db = drizzle(sql, { schema });
 export * from "./schema";
 export { and, asc, desc, eq, gt, gte, inArray, lt, lte, ne, or, sql as rawSql } from "drizzle-orm";
+export { canSeeMeeting, setAttendees } from "./access";

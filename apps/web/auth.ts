@@ -1,6 +1,7 @@
 import { db, users } from "@notetaker/db";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import { isAllowedEmail } from "@/lib/access";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -12,6 +13,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/" },
   callbacks: {
+    // Only company accounts (see ALLOWED_EMAIL_DOMAINS / ALLOWED_EMAILS) may sign in.
+    signIn({ profile }) {
+      if (!profile?.email || profile.email_verified === false) return false;
+      return isAllowedEmail(profile.email) ? true : "/?error=not_allowed";
+    },
     async jwt({ token, profile }) {
       // Only present on the sign-in request itself.
       if (profile?.email) {

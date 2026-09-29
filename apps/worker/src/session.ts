@@ -58,7 +58,8 @@ export async function finalizeMeeting(meeting: Meeting): Promise<void> {
 /** Steps 6-12 for one meeting. Caller has already moved it to "joining". */
 export async function runMeeting(meeting: Meeting): Promise<void> {
   const ctx = { meeting: meeting.id, title: meeting.title };
-  const [bot] = await db.select().from(botAccounts).where(eq(botAccounts.userId, meeting.userId));
+  // One company-wide bot account.
+  const [bot] = await db.select().from(botAccounts).limit(1);
   if (!bot) {
     log.warn("no bot account connected", ctx);
     await setStatus(meeting.id, "failed", { failureReason: "No bot account is connected." });

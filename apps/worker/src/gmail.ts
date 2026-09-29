@@ -1,4 +1,4 @@
-import { and, botAccounts, db, eq, inArray, meetings, type BotAccount } from "@notetaker/db";
+import { and, botAccounts, db, eq, inArray, meetings, setAttendees, type BotAccount } from "@notetaker/db";
 import { accessToken } from "./calendar";
 import { log } from "./log";
 
@@ -40,7 +40,7 @@ async function checkBot(bot: BotAccount): Promise<void> {
     const [seen] = await db
       .select({ id: meetings.id })
       .from(meetings)
-      .where(and(eq(meetings.userId, bot.userId), eq(meetings.calendarEventId, calendarEventId)));
+      .where(eq(meetings.calendarEventId, calendarEventId));
     if (seen) continue;
 
     const msg = await gmail<Message>(token, `messages/${id}?format=full`);
@@ -54,23 +54,34 @@ async function checkBot(bot: BotAccount): Promise<void> {
     const [already] = await db
       .select({ id: meetings.id })
       .from(meetings)
-      .where(and(eq(meetings.userId, bot.userId), eq(meetings.meetUrl, meetUrl), inArray(meetings.status, [...ACTIVE])));
+      .where(and(eq(meetings.meetUrl, meetUrl), inArray(meetings.status, [...ACTIVE])));
     if (already) continue;
 
-    const subject = msg.payload?.headers?.find((h) => h.name.toLowerCase() === "subject")?.value;
+    const header = (name: string) =>
+      msg.payload?.headers?.find((h) => h.name.toLowerCase() === name)?.value;
+    const subject = header("subject");
+    // Meet sends these as `From: "person@x.com (via Google Meet)" <meetings-noreply@google.com>`
+    // with subject "Happening now: person@x.com is inviting you to a video call".
+    // That person gets to see the notes.
+    const EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)+/;
+    const fromName = header("from")?.split("<")[0] ?? "";
+    const inviter = [header("reply-to"), fromName, subject]
+      .map((v) => v?.match(EMAIL)?.[0])
+      .find((e) => e && !e.toLowerCase().endsWith("@google.com"));
     const now = new Date();
-    await db
+    const [created] = await db
       .insert(meetings)
       .values({
-        userId: bot.userId,
         calendarEventId,
-        title: subject?.replace(/^invitation:\s*/i, "").trim() || `Meet ${meetUrl.split("/").pop()}`,
+        title: inviter ? `Call with ${inviter}` : `Meet ${meetUrl.split("/").pop()}`,
         meetUrl,
         startsAt: now,
         endsAt: new Date(now.getTime() + 2 * 60 * 60_000),
       })
-      .onConflictDoNothing();
-    log.info("meet invite email detected", { bot: bot.email, meetUrl });
+      .onConflictDoNothing()
+      .returning({ id: meetings.id });
+    if (created) await setAttendees(db, created.id, [inviter]);
+    log.info("meet invite email detected", { bot: bot.email, meetUrl, inviter });
   }
 }
 
