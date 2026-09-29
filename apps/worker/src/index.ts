@@ -108,6 +108,10 @@ async function shutdown(signal: string): Promise<void> {
   process.exit(0);
 }
 
+// A dropped connection (sleep, Wi-Fi) must not kill the worker; the loops retry on their next tick.
+process.on("unhandledRejection", (err) => log.error("unhandled rejection", { err: String(err) }));
+process.on("uncaughtException", (err) => log.error("uncaught exception", { err: String(err) }));
+
 async function main(): Promise<void> {
   log.info("worker starting", { workerId: config.workerId, maxConcurrentBots: config.maxConcurrentBots });
   await recoverOrphans();
