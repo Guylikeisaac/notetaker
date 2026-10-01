@@ -27,6 +27,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
           Sign in with Google
         </button>
       </form>
+      <a href="/privacy" className="text-sm text-zinc-500 hover:underline">
+        Privacy policy
+      </a>
     </main>
   );
 }
