@@ -106,9 +106,10 @@ async function syncBot(bot: BotAccount): Promise<void> {
       });
     const [row] = await db.select({ id: meetings.id }).from(meetings).where(eq(meetings.calendarEventId, e.id));
     if (row) {
-      // Everyone on the invite can see this meeting's notes in the app.
-      const guests = (e.attendees ?? []).filter((a) => !a.self).map((a) => a.email);
-      await setAttendees(db, row.id, [...guests, e.organizer?.email, e.creator?.email].filter((m) => m !== bot.email));
+      // Only whoever invited the bot sees the notes: the event's organizer
+      // (or its creator, when the organizer is a shared/group calendar).
+      const organizer = e.organizer?.email?.endsWith("calendar.google.com") ? undefined : e.organizer?.email;
+      await setAttendees(db, row.id, [organizer ?? e.creator?.email].filter((m) => m && m !== bot.email));
     }
     upserted++;
   }

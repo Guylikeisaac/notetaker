@@ -148,7 +148,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             {bot ? (
               <p>
                 Add <span className="font-medium text-zinc-900 dark:text-zinc-100">{bot.email}</span> as a guest on any
-                calendar event with a Meet link, or use <span className="font-medium text-zinc-900 dark:text-zinc-100">Add people</span> inside a running Meet. It joins on its own, and everyone on the invite sees the notes here.
+                calendar event with a Meet link, or use <span className="font-medium text-zinc-900 dark:text-zinc-100">Add people</span> inside a running Meet. It joins on its own, and the notes show up here for whoever invited it.
               </p>
             ) : (
               <p>Once the bot is connected, invite its email address to your meetings.</p>

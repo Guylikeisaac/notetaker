@@ -31,7 +31,7 @@ packages/db   Drizzle schema + Postgres client + token encryption, shared by bot
 
 - **One shared bot.** An admin (`ADMIN_EMAILS`) connects the bot's Google account once, from the dashboard or with `pnpm bot:connect <admin-email> <bot-email>`.
 - **Sign-in** is limited to `ALLOWED_EMAIL_DOMAINS` (e.g. `syncup.in`) plus any `ALLOWED_EMAILS`.
-- **Who sees what.** Each meeting stores its guest list: calendar guests and organizer, the person who used Meet's *Add people*, or whoever sent the bot from the dashboard. People see only meetings they're on.
+- **Who sees what.** Only the person who invited the bot sees a meeting's notes: the calendar event's organizer, the person who used Meet's *Add people*, or whoever sent the bot from the dashboard.
 - **Invites.** Everyone just invites the bot's email, from a calendar event or with *Add people* in a running Meet.
 
 ## Setup

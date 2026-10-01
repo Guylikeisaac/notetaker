@@ -89,8 +89,9 @@ export const meetings = pgTable(
   ],
 );
 
-// Who may see a meeting: its calendar guests and organizer, the person who
-// sent a Meet "Add people" invite, or whoever sent the bot from the dashboard.
+// Who may see a meeting: whoever invited the bot, i.e. the calendar event's
+// organizer, the person who used Meet's "Add people", or whoever sent the bot
+// from the dashboard.
 export const meetingAttendees = pgTable(
   "meeting_attendees",
   {

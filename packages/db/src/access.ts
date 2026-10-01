@@ -2,7 +2,7 @@ import { eq, or, sql, type SQL } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { meetingAttendees, meetings } from "./schema";
 
-/** A user sees a meeting if they're on its guest list or sent the bot themselves. */
+/** A user sees a meeting only if they invited the bot to it. */
 export function canSeeMeeting(userId: string, email: string): SQL {
   return or(
     eq(meetings.userId, userId),

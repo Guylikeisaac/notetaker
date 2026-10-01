@@ -19,7 +19,7 @@ export async function requireUser(): Promise<CurrentUser> {
   return user;
 }
 
-/** The meeting if the user was on its guest list or sent the bot, else null. */
+/** The meeting if the user invited the bot to it, else null. */
 export async function visibleMeeting(user: CurrentUser, meetingId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(meetingId)) return null;
   const [m] = await db
