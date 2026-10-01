@@ -18,6 +18,7 @@ if (!email || !email.includes("@")) {
 const dir = join(profilesDir, email);
 await mkdir(dir, { recursive: true });
 const context = await chromium.launchPersistentContext(dir, {
+  channel: "chromium", // same browser build as the worker, so the saved sign-in is readable
   headless: false,
   args: ["--disable-blink-features=AutomationControlled"],
   ignoreDefaultArgs: ["--enable-automation"],
@@ -28,9 +29,13 @@ await page.goto(`https://accounts.google.com/AccountChooser?Email=${encodeURICom
 console.log(`Sign in as ${email} in the browser window, then close the window.`);
 console.log(`Profile: ${dir}`);
 // On macOS closing the last window doesn't quit the browser, so watch the page too.
+// On a server (virtual screen, no window buttons) press Ctrl+C when signed in.
+console.log("Close the window, or press Ctrl+C here, once you're signed in.");
 await new Promise<void>((resolve) => {
   context.on("close", () => resolve());
   page.on("close", () => resolve());
+  process.once("SIGINT", () => resolve());
+  process.once("SIGTERM", () => resolve());
 });
 await context.close().catch(() => {});
 console.log("Saved. The worker will now join meetings as this account.");

@@ -2,6 +2,12 @@
 # Keep the Playwright image tag in sync with the playwright version in package.json.
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
 
+# pulseaudio: a virtual sound card, so Chrome actually renders call audio for capture.
+# x11vnc: lets an admin see the virtual screen once, to sign the bot into Google.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends pulseaudio x11vnc \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 RUN corepack enable
 
@@ -18,4 +24,5 @@ WORKDIR /app/apps/worker
 ENV BOT_HEADLESS=false \
     BOT_PROFILES_DIR=/data/bot-profiles
 VOLUME /data
-CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x800x24", "pnpm", "start"]
+ENTRYPOINT ["/app/apps/worker/docker-entrypoint.sh"]
+CMD ["pnpm", "start"]

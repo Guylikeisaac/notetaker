@@ -1,0 +1,38 @@
+# Run from this folder on the server:
+#   docker compose up -d --build              start the bot (restarts on crash/reboot)
+#   docker compose --profile login run --rm --service-ports login   one-time Google sign-in
+services:
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    env_file: ../../.env
+    environment:
+      WORKER_ID: aws-1
+    volumes:
+      - bot-data:/data # signed-in Google profile survives restarts and updates
+    shm_size: 1gb # Chrome needs more shared memory than Docker's 64 MB default
+    restart: always
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # One-time: opens Chrome on a virtual screen you can see over VNC, to sign the bot in.
+  login:
+    profiles: [login]
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    env_file: ../../.env
+    environment:
+      VNC: "1"
+      BOT_EMAIL: ${BOT_EMAIL:-notetaker@syncup.in}
+    volumes:
+      - bot-data:/data
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:5900:5900" # server loopback only; reach it with an SSH tunnel
+    command: ["sh", "-c", "./node_modules/.bin/tsx src/login.ts $$BOT_EMAIL"]
+
+volumes:
+  bot-data:
