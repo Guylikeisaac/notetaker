@@ -1,7 +1,7 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { config } from "../config";
 import { log } from "../log";
@@ -129,7 +129,15 @@ export class MeetBot {
       const text = await this.bodyText();
       if (UI.invalid.test(text)) throw new JoinError("Meet link is invalid or the meeting has ended");
       if (UI.denied.test(text)) throw new JoinError("Meet refused the bot before the lobby");
-      if (Date.now() > deadline) throw new JoinError("Meet pre-join screen never loaded");
+      if (Date.now() > deadline) {
+        const url = page.url();
+        const snippet = text.replace(/\s+/g, " ").trim().slice(0, 300);
+        const shot = join(dirname(config.profilesDir), "debug", `prejoin-${Date.now()}.png`);
+        await mkdir(dirname(shot), { recursive: true }).catch(() => {});
+        await page.screenshot({ path: shot }).catch(() => {});
+        log.warn("pre-join screen never loaded", { url, title: await page.title().catch(() => ""), text: snippet, screenshot: shot });
+        throw new JoinError(`Meet pre-join screen never loaded (at ${url}: "${snippet.slice(0, 150)}")`);
+      }
       await page.waitForTimeout(1000);
     }
 
