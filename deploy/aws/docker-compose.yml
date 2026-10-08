@@ -1,7 +1,34 @@
 # Run from this folder on the server:
 #   docker compose up -d --build              start the bot (restarts on crash/reboot)
+#   docker compose --profile web up -d --build   also run the website, public via ngrok
 #   docker compose --profile login run --rm --service-ports login   one-time Google sign-in
 services:
+  # Optional: self-host the website instead of Vercel.
+  web:
+    profiles: [web]
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    env_file: ../../.env
+    environment:
+      AUTH_TRUST_HOST: "true" # behind ngrok; trust its forwarded host/proto
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: always
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # Public HTTPS for the website. Needs NGROK_AUTHTOKEN and NGROK_DOMAIN in .env.
+  ngrok:
+    profiles: [web]
+    image: ngrok/ngrok:alpine
+    env_file: ../../.env
+    entrypoint: ["sh", "-c", "exec ngrok http --url=$$NGROK_DOMAIN web:3000 --log stdout"]
+    depends_on: [web]
+    restart: always
+
+
   worker:
     build:
       context: ../..
