@@ -1,58 +1,122 @@
-# Oracle Cloud Always Free (Ampere A1, arm64). Run from this folder on the server:
-#   docker compose up -d --build              start the bot (restarts on crash/reboot)
-#   docker compose --profile web up -d --build   also run the website, public via ngrok
-#   docker compose --profile login run --rm --service-ports login   one-time Google sign-in
-# Every image here is multi-arch, so the same Dockerfiles build natively on ARM.
+# Everything on one Oracle Cloud Always Free VM (Ampere A1, arm64):
+# Postgres, the website behind Caddy (automatic HTTPS), and the meeting bot.
+#
+# Run from this folder on the server (see README.md):
+#   ./init-env.sh                                   one time: writes ../../.env
+#   docker compose up -d --build                    start / update everything
+#   docker compose --profile login run --rm --service-ports login   one-time Google sign-in for the bot
+#
+# ./.env is a symlink to ../../.env, so ${APP_DOMAIN} etc. below come from it.
+x-base: &base
+  restart: always
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+# Services running our code read the app settings from ../../.env.
+x-app: &app
+  <<: *base
+  env_file: ../../.env
+
 services:
-  # Optional: self-host the website instead of Vercel.
-  web:
-    profiles: [web]
-    build:
-      context: ../..
-      dockerfile: apps/web/Dockerfile
-    env_file: ../../.env
+  db:
+    <<: *base
+    image: postgres:17-alpine
     environment:
-      AUTH_TRUST_HOST: "true" # behind ngrok; trust its forwarded host/proto
-    ports:
-      - "127.0.0.1:3000:3000"
-    restart: always
-    logging:
-      driver: json-file
-      options: { max-size: "20m", max-file: "5" }
+      POSTGRES_USER: notetaker
+      POSTGRES_DB: notetaker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./init-env.sh first}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "notetaker"]
+      interval: 5s
+      retries: 20
 
-  # Public HTTPS for the website. Needs NGROK_AUTHTOKEN and NGROK_DOMAIN in .env.
-  ngrok:
-    profiles: [web]
-    image: ngrok/ngrok:alpine
-    env_file: ../../.env
-    entrypoint: ["sh", "-c", "exec ngrok http --url=$$NGROK_DOMAIN web:3000 --log stdout"]
-    depends_on: [web]
-    restart: always
+  # Daily gzipped dump, last 14 kept. Copy them off the VM now and then:
+  #   docker compose cp backup:/backups ./backups
+  backup:
+    <<: *base
+    image: postgres:17-alpine
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg-backups:/backups
+    depends_on:
+      db: { condition: service_healthy }
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          pg_dump -h db -U notetaker notetaker | gzip > /backups/notetaker-$$(date +%F).sql.gz
+          find /backups -name '*.sql.gz' -mtime +14 -delete
+          sleep 86400
+        done
 
-  worker:
+  # Creates/updates the tables on every `up`, then exits.
+  migrate:
+    <<: *app
+    image: notetaker-worker:local
     build:
       context: ../..
       dockerfile: apps/worker/Dockerfile
-    env_file: ../../.env
+    restart: "no"
+    working_dir: /app/packages/db
+    entrypoint: ["pnpm", "exec", "drizzle-kit", "push", "--force"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  web:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      AUTH_TRUST_HOST: "true" # behind Caddy; trust its forwarded host/proto
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  # Public HTTPS with a free Let's Encrypt certificate for APP_DOMAIN.
+  caddy:
+    <<: *base
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?run ./init-env.sh first}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [web]
+
+  worker:
+    <<: *app
+    image: notetaker-worker:local
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
     environment:
       WORKER_ID: oracle-1
-      TZ: Asia/Kolkata # recording file names use local time
+      TZ: ${TZ:-Asia/Kolkata} # recording file names use local time
     volumes:
       # Signed-in Google profile and not-yet-uploaded recordings survive restarts and updates.
       - bot-data:/data
     shm_size: 1gb # Chrome needs more shared memory than Docker's 64 MB default
-    restart: always
-    logging:
-      driver: json-file
-      options: { max-size: "20m", max-file: "5" }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
 
   # One-time: opens Chrome on a virtual screen you can see over VNC, to sign the bot in.
   login:
+    <<: *app
     profiles: [login]
+    image: notetaker-worker:local
     build:
       context: ../..
       dockerfile: apps/worker/Dockerfile
-    env_file: ../../.env
+    restart: "no"
     environment:
       VNC: "1"
       BOT_EMAIL: ${BOT_EMAIL:-notetaker@syncup.in}
@@ -64,4 +128,8 @@ services:
     command: ["sh", "-c", "./node_modules/.bin/tsx src/login.ts $$BOT_EMAIL"]
 
 volumes:
+  pg-data:
+  pg-backups:
   bot-data:
+  caddy-data:
+  caddy-config:

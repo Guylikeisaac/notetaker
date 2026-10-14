@@ -61,7 +61,7 @@ packages/db   Drizzle schema + Postgres client + token encryption, shared by bot
 ## Deploying
 
 **AWS EC2 step-by-step guide for the worker: [`deploy/aws/README.md`](deploy/aws/README.md).**
-**Oracle Cloud Always Free (ARM) guide: [`deploy/oracle/README.md`](deploy/oracle/README.md).**
+**Everything free on one Oracle Cloud VM (website, Postgres, bot, HTTPS): [`deploy/oracle/README.md`](deploy/oracle/README.md).**
 
 - **Web → Vercel.** Set the project root to `apps/web` and add `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, and `AUTH_SECRET`.
 - **Worker → any long-running container host** (Fly.io, Railway, ECS, a VM). Calls can last hours, and each bot holds a real Chrome process, so the worker can't run as a serverless function.

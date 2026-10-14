@@ -1,0 +1,7 @@
+{$APP_DOMAIN} {
+	encode gzip
+	# The live transcript is Server-Sent Events; flush every message immediately.
+	reverse_proxy web:3000 {
+		flush_interval -1
+	}
+}

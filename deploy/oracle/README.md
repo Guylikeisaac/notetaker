@@ -1,143 +1,152 @@
-# Deploying the bot (worker) on Oracle Cloud Always Free
+# Hosting everything free on Oracle Cloud
 
-Runs the **meeting bot** on a free Ampere (ARM) VM. The website can stay on
-Vercel, or run on the same VM behind ngrok (see the end). About 30 minutes.
+One Oracle **Always Free** VM runs the whole product:
 
-You need:
-- The `.env` file. It is **not** in this repo, and must never be committed.
-- The bot account's Google password (`notetaker@syncup.in`) for a one-time sign-in in step 5.
+| Piece | Runs as | Cost |
+|---|---|---|
+| Website (Next.js) | `web` container behind **Caddy** with a free Let's Encrypt certificate | free |
+| Database | `db` container (Postgres 17) + `backup` (daily dump, 14 kept) | free |
+| Meeting bot | `worker` container (Chrome on a virtual screen) | free |
+| Recordings | the bot account's Google Drive | free (Drive storage) |
+| Live notes + report | Gemini API free tier | free, within its daily quota |
+| Speech-to-text | AssemblyAI streaming | free signup credit (hundreds of meeting hours), then about $0.15 per hour |
+| Google sign-in | OAuth consent screen set to **Internal** | free, no Google review |
 
-## 1. Create the VM
+About 45 minutes the first time.
+
+## 1. Google Cloud (OAuth client)
+
+In [console.cloud.google.com](https://console.cloud.google.com), signed in with a **syncup.in** account:
+
+1. Create a project, e.g. `notetaker`.
+2. **APIs & Services → Library**: enable **Google Calendar API**, **Gmail API** and **Google Drive API**.
+3. **OAuth consent screen**: User type **Internal**. Internal apps only accept syncup.in accounts and need no Google verification, even for the Gmail scope.
+4. **Credentials → Create credentials → OAuth client ID → Web application.** Add the redirect URIs later, in step 5, once you know the domain. Keep the client ID and secret.
+
+API keys:
+- **Gemini**: [aistudio.google.com](https://aistudio.google.com) → Get API key (free tier).
+- **AssemblyAI**: [assemblyai.com](https://www.assemblyai.com) → sign up → API key.
+
+## 2. Create the VM
 
 Oracle Cloud console → **Compute → Instances → Create instance**:
 
 | Setting | Value |
 |---|---|
-| Name | `notetaker-bot` |
-| Image | **Canonical Ubuntu 24.04** (pick the aarch64 build, the default for Ampere) |
-| Shape | **VM.Standard.A1.Flex**: **2 OCPU, 12 GB RAM** (comfortably 4–6 meetings at once with recording). The free allowance is 4 OCPU / 24 GB in total. |
-| Networking | Default VCN with a public subnet, **Assign a public IPv4 address** on |
-| SSH keys | Upload your public key, or download the generated private key |
-| Boot volume | **100 GB** (free up to 200 GB in total). Recordings are staged here until they reach Drive. |
+| Name | `notetaker` |
+| Image | **Canonical Ubuntu 24.04** (aarch64) |
+| Shape | **VM.Standard.A1.Flex**: **4 OCPU, 24 GB** (the entire free allowance; handles 4–6 meetings at once with recording) |
+| Networking | Public subnet, **Assign a public IPv4 address** on |
+| SSH keys | Upload your public key |
+| Boot volume | **100 GB** (free up to 200 GB in total) |
 
-No inbound ports are needed besides SSH (22), which the default security list already allows.
+Then open the web ports in Oracle's firewall: open the instance's **subnet → Security list → Add ingress rules**. Source `0.0.0.0/0`, TCP, destination ports **80** and **443**.
 
-**"Out of capacity" for A1?** Common in busy regions. Retry later, try another
-availability domain, or upgrade the account to *Pay As You Go*. PAYG stays free
-inside the Always Free limits and gets A1 capacity much more easily.
+Two things to know:
+- **"Out of capacity"** for A1 is common. Retry later, try another availability domain, or upgrade to Pay As You Go (below).
+- **Idle reclamation**: Oracle can reclaim Always Free VMs that stay almost idle for 7 days. A bot between meetings can look idle.
 
-**Idle reclamation.** Oracle may reclaim Always Free VMs that stay nearly idle
-(under 20% CPU, network, and memory) for 7 days. A bot that only wakes for
-meetings can look idle. Upgrading to PAYG stops reclamation and the VM still
-costs nothing.
+**Recommended: upgrade the account to Pay As You Go** (Billing → Upgrade). It needs a card, but anything inside the Always Free limits stays at $0. It removes idle reclamation and makes A1 capacity much easier to get. Add a budget alert (Billing → Budgets, e.g. ₹100) to catch surprises.
 
-## 2. Install Docker
+## 3. A domain for the website
+
+Either:
+- **Your own subdomain (recommended)**: add a DNS **A record** such as `notes.syncup.in` pointing to the VM's public IP, or
+- **No DNS access**: use `<ip-with-dashes>.sslip.io`, e.g. `140-238-1-2.sslip.io`. It resolves to your IP automatically. `init-env.sh` suggests it.
+
+## 4. Server setup
+
+The repo is private, so give the server a read-only **deploy key**:
 
 ```sh
-ssh -i your-key ubuntu@<public-ip>
-curl -fsSL https://raw.githubusercontent.com/Guylikeisaac/notetaker/main/deploy/aws/setup.sh | sh
-exit   # log out and back in so docker works without sudo
+ssh ubuntu@<public-ip>
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub
 ```
 
-(The script is shared with the AWS guide and works on ARM too.)
-
-## 3. Get the code and the secrets
+Add the printed key at GitHub → `ayushsyncup/notetaker` → **Settings → Deploy keys** (read-only). Then:
 
 ```sh
-ssh -i your-key ubuntu@<public-ip>
-git clone https://github.com/Guylikeisaac/notetaker.git
+git clone git@github.com:ayushsyncup/notetaker.git
+sh ~/notetaker/deploy/oracle/setup.sh   # Docker + opens 80/443 in the VM firewall
+exit                                    # log out and back in so docker works without sudo
 ```
 
-From your own computer:
+## 5. Settings
 
 ```sh
-scp -i your-key .env ubuntu@<public-ip>:~/notetaker/.env
-```
-
-On the server: `chmod 600 ~/notetaker/.env`
-
-## 4. Build
-
-```sh
+ssh ubuntu@<public-ip>
 cd ~/notetaker/deploy/oracle
-docker compose build
+./init-env.sh
 ```
 
-The first build on ARM takes 5–10 minutes.
+It asks for the domain, admin emails, bot account, Google client, and API keys. It generates every password and secret itself and writes `~/notetaker/.env` (readable only by you).
 
-## 5. Sign the bot into Google (one time)
+It prints two redirect URIs at the end. Add both to the OAuth client from step 1 (**Credentials → your client → Authorized redirect URIs**).
 
-**Terminal 1** (your computer). Open a tunnel and start the login browser:
+## 6. Start
+
 ```sh
-ssh -i your-key -L 5900:127.0.0.1:5900 ubuntu@<public-ip>
+docker compose up -d --build     # first ARM build takes ~10 minutes
+docker compose ps                # everything "running"; migrate "exited (0)"
+docker compose logs -f worker    # Ctrl+C stops watching
+```
+
+Open `https://<your domain>`. Caddy gets the HTTPS certificate on the first visit, which takes a few seconds.
+
+## 7. Sign the bot into Google (one time)
+
+**On your computer**, open a tunnel and start the login browser:
+```sh
+ssh -L 5900:127.0.0.1:5900 ubuntu@<public-ip>
 cd ~/notetaker/deploy/oracle
 docker compose --profile login run --rm --service-ports login
 ```
 
-**View the screen:** macOS Finder → **Go → Connect to Server** → `vnc://localhost:5900`
-(leave the password empty). On Windows or Linux, use any VNC viewer at `localhost:5900`.
+View it: macOS Finder → **Go → Connect to Server** → `vnc://localhost:5900` (no password).
+Sign in as the bot account. When the Meet home page appears, press **Ctrl+C**. You'll see `Saved.`
 
-Sign in as `notetaker@syncup.in` and approve any "Is it you?" check. When the
-Google Meet home page shows, press **Ctrl+C** in Terminal 1. You'll see `Saved.`
+## 8. Connect the bot
 
-## 6. Reconnect the bot for Google Drive (one time, after the recording update)
+Sign in to the website as an admin → **Connect bot account** → choose the bot
+account → allow Calendar, Gmail and **Google Drive**.
 
-Recordings go to the bot account's Google Drive, which needs the `drive.file`
-permission. An admin opens the website dashboard → **Disconnect** → **Connect bot
-account**, and ticks the Google Drive box on the consent screen.
+To test it, invite the bot's email to a Meet event starting in a couple of minutes.
 
-Until then, meetings still get transcripts and notes. Each recording waits on the
-server and the page says *"Google Drive access is missing"*. After the reconnect,
-the waiting recordings upload within 10 minutes.
+## Everyday commands
 
-## 7. Start the bot
+Run these in `~/notetaker/deploy/oracle`:
 
-```sh
-cd ~/notetaker/deploy/oracle
-docker compose up -d
-docker compose logs -f worker     # Ctrl+C stops watching; the bot keeps running
-```
+| Task | Command |
+|---|---|
+| Logs | `docker compose logs -f worker` (or `web`, `caddy`, `db`) |
+| Update to the latest code | `git pull && docker compose up -d --build` |
+| Restart the bot | `docker compose restart worker` |
+| Stop everything | `docker compose down` (data is kept in volumes) |
+| Copy backups to the VM | `docker compose cp backup:/backups ./backups` |
+| Restore a backup | `gunzip -c backups/<file>.sql.gz \| docker compose exec -T db psql -U notetaker notetaker` |
+| Disk | `df -h /` and `docker system df` |
 
-Expect `"worker starting"`, and no `"calendar sync failed"` within a minute.
-
-**Only one worker per database.** Stop any other worker (a laptop, the AWS box)
-pointed at the same `DATABASE_URL` with a different `WORKER_ID`, or both will
-compete for meetings. This is safe, but confusing.
+Copy backups off the VM now and then (`scp -r ubuntu@<ip>:notetaker/deploy/oracle/backups .`). They live on the same disk as the database.
 
 ## Recordings
 
 - Saved as WebM in the bot's Drive, folder **Notetaker recordings**, and shared
-  (view-only, no email) with whoever invited the bot. The meeting page links to it.
-- `RECORDING=video` (default) records the Meet tab at 720p, ~300 MB per hour.
-  `RECORDING=audio` records ~30 MB per hour. `RECORDING=off` disables recording.
-- The bot account's Drive storage is the limit. A Workspace account gets the
-  pooled storage; a free Gmail account gets 15 GB.
-- Files that fail to upload stay in the `bot-data` volume and are retried every
-  10 minutes.
+  view-only (no email) with whoever invited the bot. The meeting page links to it.
+- `RECORDING=video` is about 300 MB per meeting-hour; `audio` about 30 MB; `off` disables it.
+- A Workspace bot account uses the pooled storage; a Gmail bot account gets 15 GB.
+- Failed uploads stay in the `bot-data` volume and are retried every 10 minutes.
 
-## Everyday commands
+## Staying inside free quotas
 
-| Task | Command (in `~/notetaker/deploy/oracle`) |
-|---|---|
-| Watch logs | `docker compose logs -f worker` |
-| Update to the latest code | `git pull && docker compose up -d --build` |
-| Restart | `docker compose restart worker` |
-| Stop | `docker compose down` (sign-in and pending recordings are kept) |
-| Disk usage | `df -h /` and `docker system df` |
-| Re-do Google sign-in | repeat step 5 |
-
-## Optional: website on the same VM
-
-Add `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` (a free static ngrok domain) to `.env`, and add
-`https://<NGROK_DOMAIN>/api/auth/callback/google` and `https://<NGROK_DOMAIN>/api/bot/callback`
-as redirect URIs on the Google OAuth client. Then:
-
-```sh
-docker compose --profile web up -d --build
-```
+- **Gemini**: `init-env.sh` sets live notes to `gemini-2.5-flash-lite` every 2 minutes
+  (~30 calls per meeting-hour). Final reports use `gemini-2.5-flash`. If you see
+  `429` in the worker logs, raise `LIVE_NOTES_INTERVAL_SECONDS` in `.env`, then run `docker compose up -d`.
+- **AssemblyAI** is the one metered piece. Watch the credit in its dashboard.
 
 ## Troubleshooting
 
-- **`calendar sync failed ... invalid_grant`**: the bot's Google connection expired. Reconnect it from the dashboard.
-- **`recording upload failed ... insufficient`**: Drive permission missing. See step 6.
+- **Site doesn't load / no certificate**: check that ports 80 and 443 are open in the Oracle security list (step 2) and the DNS record points at the VM. Then check `docker compose logs caddy`.
+- **`redirect_uri_mismatch`** on sign-in: the URIs on the OAuth client must exactly match the ones `init-env.sh` printed.
+- **`calendar sync failed ... invalid_grant`**: reconnect the bot from the dashboard.
+- **`recording upload failed ... insufficient`**: the bot was connected without Drive access. Reconnect it and tick Drive.
 - **Transcript stays empty**: `docker compose logs worker | grep -E "tab capture|unmuted|audio"`.

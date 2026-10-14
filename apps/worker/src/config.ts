@@ -41,5 +41,6 @@ export const config = {
   admissionTimeoutMs: 10 * 60_000,
   aloneTimeoutMs: 3 * 60_000, // leave after being the only participant this long
   overrunGraceMs: 60 * 60_000, // hard cap: leave this long after scheduled end
-  liveNotesIntervalMs: 45_000,
+  // Each tick is one Gemini call per live meeting; raise it to stay inside free-tier quotas.
+  liveNotesIntervalMs: Number(process.env.LIVE_NOTES_INTERVAL_SECONDS ?? 45) * 1000,
 };
