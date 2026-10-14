@@ -1,106 +1,32 @@
-# Everything on one Oracle Cloud Always Free VM (Ampere A1, arm64):
-# Postgres, the website behind Caddy (automatic HTTPS), and the meeting bot.
+# The meeting bot on an Oracle Cloud Always Free VM (Ampere A1, arm64).
+# The website runs on Vercel and the database on Supabase; see README.md.
 #
-# Run from this folder on the server (see README.md):
-#   ./init-env.sh                                   one time: writes ../../.env
-#   docker compose up -d --build                    start / update everything
+# Run from this folder on the server:
+#   docker compose up -d --build                    start / update the bot
 #   docker compose --profile login run --rm --service-ports login   one-time Google sign-in for the bot
-#
-# ./.env is a symlink to ../../.env, so ${APP_DOMAIN} etc. below come from it.
-x-base: &base
-  restart: always
+x-app: &app
+  env_file: ../../.env
+  image: notetaker-worker:local
+  build:
+    context: ../..
+    dockerfile: apps/worker/Dockerfile
   logging:
     driver: json-file
     options: { max-size: "20m", max-file: "5" }
 
-# Services running our code read the app settings from ../../.env.
-x-app: &app
-  <<: *base
-  env_file: ../../.env
-
 services:
-  db:
-    <<: *base
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: notetaker
-      POSTGRES_DB: notetaker
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./init-env.sh first}
-    volumes:
-      - pg-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "notetaker"]
-      interval: 5s
-      retries: 20
-
-  # Daily gzipped dump, last 14 kept. Copy them off the VM now and then:
-  #   docker compose cp backup:/backups ./backups
-  backup:
-    <<: *base
-    image: postgres:17-alpine
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - pg-backups:/backups
-    depends_on:
-      db: { condition: service_healthy }
-    entrypoint:
-      - sh
-      - -c
-      - |
-        while true; do
-          pg_dump -h db -U notetaker notetaker | gzip > /backups/notetaker-$$(date +%F).sql.gz
-          find /backups -name '*.sql.gz' -mtime +14 -delete
-          sleep 86400
-        done
-
-  # Creates/updates the tables on every `up`, then exits.
+  # Creates/updates the database tables on every `up`, then exits.
   migrate:
     <<: *app
-    image: notetaker-worker:local
-    build:
-      context: ../..
-      dockerfile: apps/worker/Dockerfile
-    restart: "no"
     working_dir: /app/packages/db
     entrypoint: ["pnpm", "exec", "drizzle-kit", "push", "--force"]
-    depends_on:
-      db: { condition: service_healthy }
-
-  web:
-    <<: *app
-    build:
-      context: ../..
-      dockerfile: apps/web/Dockerfile
-    environment:
-      AUTH_TRUST_HOST: "true" # behind Caddy; trust its forwarded host/proto
-    depends_on:
-      migrate: { condition: service_completed_successfully }
-
-  # Public HTTPS with a free Let's Encrypt certificate for APP_DOMAIN.
-  caddy:
-    <<: *base
-    image: caddy:2-alpine
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN:?run ./init-env.sh first}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on: [web]
 
   worker:
     <<: *app
-    image: notetaker-worker:local
-    build:
-      context: ../..
-      dockerfile: apps/worker/Dockerfile
+    restart: always
     environment:
       WORKER_ID: oracle-1
-      TZ: ${TZ:-Asia/Kolkata} # recording file names use local time
+      TZ: Asia/Kolkata # recording file names use local time
     volumes:
       # Signed-in Google profile and not-yet-uploaded recordings survive restarts and updates.
       - bot-data:/data
@@ -112,14 +38,8 @@ services:
   login:
     <<: *app
     profiles: [login]
-    image: notetaker-worker:local
-    build:
-      context: ../..
-      dockerfile: apps/worker/Dockerfile
-    restart: "no"
     environment:
       VNC: "1"
-      BOT_EMAIL: ${BOT_EMAIL:-notetaker@syncup.in}
     volumes:
       - bot-data:/data
     shm_size: 1gb
@@ -128,8 +48,4 @@ services:
     command: ["sh", "-c", "./node_modules/.bin/tsx src/login.ts $$BOT_EMAIL"]
 
 volumes:
-  pg-data:
-  pg-backups:
   bot-data:
-  caddy-data:
-  caddy-config:

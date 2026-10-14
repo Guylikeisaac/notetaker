@@ -9,7 +9,11 @@ if (!url) throw new Error("DATABASE_URL is not set");
 const globalForDb = globalThis as unknown as { __notetakerSql?: postgres.Sql };
 // Recycle idle/old connections so a laptop sleep or network drop doesn't leave
 // dead sockets in the pool.
-const sql = globalForDb.__notetakerSql ?? postgres(url, { max: 10, idle_timeout: 20, max_lifetime: 30 * 60, connect_timeout: 15 });
+// prepare: false so it also works through transaction-mode poolers (Supabase
+// port 6543, used by the serverless web app), which can't keep prepared statements.
+const sql =
+  globalForDb.__notetakerSql ??
+  postgres(url, { max: 10, idle_timeout: 20, max_lifetime: 30 * 60, connect_timeout: 15, prepare: false });
 if (process.env.NODE_ENV !== "production") globalForDb.__notetakerSql = sql;
 
 export const db = drizzle(sql, { schema });

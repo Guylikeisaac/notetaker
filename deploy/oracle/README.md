@@ -1,152 +1,152 @@
-# Hosting everything free on Oracle Cloud
+# Hosting everything free
 
-One Oracle **Always Free** VM runs the whole product:
-
-| Piece | Runs as | Cost |
+| Piece | Where | Cost |
 |---|---|---|
-| Website (Next.js) | `web` container behind **Caddy** with a free Let's Encrypt certificate | free |
-| Database | `db` container (Postgres 17) + `backup` (daily dump, 14 kept) | free |
-| Meeting bot | `worker` container (Chrome on a virtual screen) | free |
+| Website | **Vercel**, https://syncup-notetaker.vercel.app | free (Hobby) |
+| Database | **Supabase** Postgres (500 MB, always on) | free |
+| Meeting bot | **Oracle Cloud** Always Free VM (Ampere A1) | free |
 | Recordings | the bot account's Google Drive | free (Drive storage) |
 | Live notes + report | Gemini API free tier | free, within its daily quota |
-| Speech-to-text | AssemblyAI streaming | free signup credit (hundreds of meeting hours), then about $0.15 per hour |
-| Google sign-in | OAuth consent screen set to **Internal** | free, no Google review |
+| Speech-to-text | AssemblyAI streaming | free signup credit, then about $0.15 per meeting-hour |
 
-About 45 minutes the first time.
+All settings live in one file, `~/notetaker/.env` on your Mac. Copy it to the VM, and push the
+website's subset to Vercel with `sh deploy/vercel-env.sh`.
 
-## 1. Google Cloud (OAuth client)
+Why Supabase and not Neon: the bot reads the database every 15–20 seconds. Neon's free
+database would never get to sleep and would use up its monthly compute hours in about two weeks.
+Supabase's free database is always on.
 
-In [console.cloud.google.com](https://console.cloud.google.com), signed in with a **syncup.in** account:
+## 1. Database (Supabase)
 
-1. Create a project, e.g. `notetaker`.
-2. **APIs & Services → Library**: enable **Google Calendar API**, **Gmail API** and **Google Drive API**.
-3. **OAuth consent screen**: User type **Internal**. Internal apps only accept syncup.in accounts and need no Google verification, even for the Gmail scope.
-4. **Credentials → Create credentials → OAuth client ID → Web application.** Add the redirect URIs later, in step 5, once you know the domain. Keep the client ID and secret.
+1. [supabase.com](https://supabase.com) → New project → name `notetaker`, region **Mumbai** (ap-south-1). Keep the database password.
+2. **Connect** (top bar) → **Session pooler** → copy the URI and put your password in it. It looks like:
+   `postgresql://postgres.<ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres`
+3. Paste it as `DATABASE_URL` in `.env`.
+4. On your Mac, create the tables: `pnpm db:push`
 
-API keys:
-- **Gemini**: [aistudio.google.com](https://aistudio.google.com) → Get API key (free tier).
-- **AssemblyAI**: [assemblyai.com](https://www.assemblyai.com) → sign up → API key.
+The website automatically uses the same URI on port **6543** (transaction pooler, made for serverless).
 
-## 2. Create the VM
+Free projects pause after 7 days with no database activity. The running bot touches the database every few seconds, so this only happens if the bot is down for a week. Restore the project from the Supabase dashboard if it does.
 
-Oracle Cloud console → **Compute → Instances → Create instance**:
+## 2. Website (Vercel)
+
+The Vercel project `notetaker` is linked to this repo with Root Directory `apps/web`.
+
+```sh
+sh deploy/vercel-env.sh    # copies DATABASE_URL, Google client, secrets, allowed emails
+vercel deploy --prod
+```
+
+On the Google OAuth client, add both redirect URIs:
+- `https://syncup-notetaker.vercel.app/api/auth/callback/google`
+- `https://syncup-notetaker.vercel.app/api/bot/callback`
+
+For auto-deploys on every push, connect the Git repo under Vercel → Project → Settings → Git (`ayushsyncup/notetaker`).
+
+## 3. Bot VM (Oracle Cloud)
+
+Oracle console → **Compute → Instances → Create instance**:
 
 | Setting | Value |
 |---|---|
-| Name | `notetaker` |
+| Name | `notetaker-bot` |
 | Image | **Canonical Ubuntu 24.04** (aarch64) |
-| Shape | **VM.Standard.A1.Flex**: **4 OCPU, 24 GB** (the entire free allowance; handles 4–6 meetings at once with recording) |
-| Networking | Public subnet, **Assign a public IPv4 address** on |
+| Shape | **VM.Standard.A1.Flex**: **2 OCPU, 12 GB** (4–6 meetings at once with recording; the free allowance is 4 OCPU / 24 GB) |
+| Networking | Public subnet, public IPv4 on. No inbound ports beyond SSH. |
 | SSH keys | Upload your public key |
-| Boot volume | **100 GB** (free up to 200 GB in total) |
+| Boot volume | **100 GB** (free up to 200 GB). Recordings wait here until they reach Drive. |
 
-Then open the web ports in Oracle's firewall: open the instance's **subnet → Security list → Add ingress rules**. Source `0.0.0.0/0`, TCP, destination ports **80** and **443**.
+- **"Out of capacity"** for A1 is common. Retry later or try another availability domain.
+- **Idle reclamation**: Oracle may reclaim Always Free VMs that stay nearly idle for 7 days.
+- Both go away if you **upgrade to Pay As You Go** (needs a card; anything inside Always Free stays $0). Add a budget alert at the same time.
 
-Two things to know:
-- **"Out of capacity"** for A1 is common. Retry later, try another availability domain, or upgrade to Pay As You Go (below).
-- **Idle reclamation**: Oracle can reclaim Always Free VMs that stay almost idle for 7 days. A bot between meetings can look idle.
+### Server setup
 
-**Recommended: upgrade the account to Pay As You Go** (Billing → Upgrade). It needs a card, but anything inside the Always Free limits stays at $0. It removes idle reclamation and makes A1 capacity much easier to get. Add a budget alert (Billing → Budgets, e.g. ₹100) to catch surprises.
-
-## 3. A domain for the website
-
-Either:
-- **Your own subdomain (recommended)**: add a DNS **A record** such as `notes.syncup.in` pointing to the VM's public IP, or
-- **No DNS access**: use `<ip-with-dashes>.sslip.io`, e.g. `140-238-1-2.sslip.io`. It resolves to your IP automatically. `init-env.sh` suggests it.
-
-## 4. Server setup
-
-The repo is private, so give the server a read-only **deploy key**:
+The repo is private, so give the server a read-only deploy key:
 
 ```sh
-ssh ubuntu@<public-ip>
+ssh ubuntu@<vm-ip>
 ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub
 ```
 
-Add the printed key at GitHub → `ayushsyncup/notetaker` → **Settings → Deploy keys** (read-only). Then:
+Add the printed key at GitHub → `ayushsyncup/notetaker` → **Settings → Deploy keys** (read-only), then:
 
 ```sh
 git clone git@github.com:ayushsyncup/notetaker.git
-sh ~/notetaker/deploy/oracle/setup.sh   # Docker + opens 80/443 in the VM firewall
-exit                                    # log out and back in so docker works without sudo
+sh ~/notetaker/deploy/oracle/setup.sh    # installs Docker
+exit                                     # log out and back in
 ```
 
-## 5. Settings
+From your Mac, copy the settings:
 
 ```sh
-ssh ubuntu@<public-ip>
+scp ~/notetaker/.env ubuntu@<vm-ip>:~/notetaker/.env
+ssh ubuntu@<vm-ip> chmod 600 notetaker/.env
+```
+
+### Start the bot
+
+```sh
+ssh ubuntu@<vm-ip>
 cd ~/notetaker/deploy/oracle
-./init-env.sh
-```
-
-It asks for the domain, admin emails, bot account, Google client, and API keys. It generates every password and secret itself and writes `~/notetaker/.env` (readable only by you).
-
-It prints two redirect URIs at the end. Add both to the OAuth client from step 1 (**Credentials → your client → Authorized redirect URIs**).
-
-## 6. Start
-
-```sh
 docker compose up -d --build     # first ARM build takes ~10 minutes
-docker compose ps                # everything "running"; migrate "exited (0)"
-docker compose logs -f worker    # Ctrl+C stops watching
+docker compose logs -f worker    # expect "worker starting"; Ctrl+C stops watching
 ```
 
-Open `https://<your domain>`. Caddy gets the HTTPS certificate on the first visit, which takes a few seconds.
+### Sign the bot into Google (one time)
 
-## 7. Sign the bot into Google (one time)
+On your Mac, open a tunnel and start the login browser:
 
-**On your computer**, open a tunnel and start the login browser:
 ```sh
-ssh -L 5900:127.0.0.1:5900 ubuntu@<public-ip>
+ssh -L 5900:127.0.0.1:5900 ubuntu@<vm-ip>
 cd ~/notetaker/deploy/oracle
 docker compose --profile login run --rm --service-ports login
 ```
 
-View it: macOS Finder → **Go → Connect to Server** → `vnc://localhost:5900` (no password).
-Sign in as the bot account. When the Meet home page appears, press **Ctrl+C**. You'll see `Saved.`
+View it: Finder → **Go → Connect to Server** → `vnc://localhost:5900` (no password). Sign in as
+the bot account. When the Meet home page appears, press **Ctrl+C**. You'll see `Saved.`
 
-## 8. Connect the bot
+## 4. Connect the bot
 
-Sign in to the website as an admin → **Connect bot account** → choose the bot
-account → allow Calendar, Gmail and **Google Drive**.
+Sign in at https://syncup-notetaker.vercel.app as an admin → **Connect bot account** → choose the
+bot account → allow Calendar, Gmail and **Google Drive**. Then invite the bot's email to a Meet
+starting in a couple of minutes.
 
-To test it, invite the bot's email to a Meet event starting in a couple of minutes.
+**Only one worker per database.** If you also run `pnpm dev:worker` on your Mac, it competes
+with the VM for meetings. That's safe, but confusing. Stop one of them.
 
 ## Everyday commands
 
-Run these in `~/notetaker/deploy/oracle`:
+On the VM, in `~/notetaker/deploy/oracle`:
 
 | Task | Command |
 |---|---|
-| Logs | `docker compose logs -f worker` (or `web`, `caddy`, `db`) |
-| Update to the latest code | `git pull && docker compose up -d --build` |
-| Restart the bot | `docker compose restart worker` |
-| Stop everything | `docker compose down` (data is kept in volumes) |
-| Copy backups to the VM | `docker compose cp backup:/backups ./backups` |
-| Restore a backup | `gunzip -c backups/<file>.sql.gz \| docker compose exec -T db psql -U notetaker notetaker` |
-| Disk | `df -h /` and `docker system df` |
+| Logs | `docker compose logs -f worker` |
+| Update the bot | `git pull && docker compose up -d --build` (also applies database changes) |
+| Restart | `docker compose restart worker` |
+| Stop | `docker compose down` (sign-in and pending recordings are kept) |
+| Changed `.env` | copy it again, then `docker compose up -d` |
 
-Copy backups off the VM now and then (`scp -r ubuntu@<ip>:notetaker/deploy/oracle/backups .`). They live on the same disk as the database.
+Website: `vercel deploy --prod` (or push, once Git is connected). After changing website
+settings in `.env`, run `sh deploy/vercel-env.sh` first.
 
 ## Recordings
 
-- Saved as WebM in the bot's Drive, folder **Notetaker recordings**, and shared
-  view-only (no email) with whoever invited the bot. The meeting page links to it.
+- Saved as WebM in the bot's Drive, folder **Notetaker recordings**, and shared view-only
+  (no email) with whoever invited the bot. The meeting page links to it.
 - `RECORDING=video` is about 300 MB per meeting-hour; `audio` about 30 MB; `off` disables it.
-- A Workspace bot account uses the pooled storage; a Gmail bot account gets 15 GB.
-- Failed uploads stay in the `bot-data` volume and are retried every 10 minutes.
+- Failed uploads stay on the VM and are retried every 10 minutes.
 
 ## Staying inside free quotas
 
-- **Gemini**: `init-env.sh` sets live notes to `gemini-2.5-flash-lite` every 2 minutes
-  (~30 calls per meeting-hour). Final reports use `gemini-2.5-flash`. If you see
-  `429` in the worker logs, raise `LIVE_NOTES_INTERVAL_SECONDS` in `.env`, then run `docker compose up -d`.
+- **Gemini**: live notes use `gemini-2.5-flash-lite` every 2 minutes (~30 calls per meeting-hour). If the worker logs show `429`, raise `LIVE_NOTES_INTERVAL_SECONDS`.
+- **Supabase**: 500 MB holds years of transcripts. Recordings don't count; they're in Drive.
 - **AssemblyAI** is the one metered piece. Watch the credit in its dashboard.
 
 ## Troubleshooting
 
-- **Site doesn't load / no certificate**: check that ports 80 and 443 are open in the Oracle security list (step 2) and the DNS record points at the VM. Then check `docker compose logs caddy`.
-- **`redirect_uri_mismatch`** on sign-in: the URIs on the OAuth client must exactly match the ones `init-env.sh` printed.
+- **`redirect_uri_mismatch`**: the two URIs in step 2 must be on the OAuth client exactly.
+- **Website 500 errors**: `vercel logs syncup-notetaker.vercel.app`. Usually a missing env var; re-run `deploy/vercel-env.sh` and redeploy.
 - **`calendar sync failed ... invalid_grant`**: reconnect the bot from the dashboard.
-- **`recording upload failed ... insufficient`**: the bot was connected without Drive access. Reconnect it and tick Drive.
+- **`recording upload failed ... insufficient`**: reconnect the bot and tick Google Drive.
 - **Transcript stays empty**: `docker compose logs worker | grep -E "tab capture|unmuted|audio"`.
