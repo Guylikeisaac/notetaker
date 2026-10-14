@@ -56,7 +56,13 @@ Oracle console → **Compute → Instances → Create instance**:
 | SSH keys | Upload your public key |
 | Boot volume | **100 GB** (free up to 200 GB). Recordings wait here until they reach Drive. |
 
-- **"Out of capacity"** for A1 is common. Retry later or try another availability domain.
+- **"Out of capacity"** for A1 is common. Let the Mac retry for you until it gets one:
+  ```sh
+  /usr/bin/python3 -m venv ~/.oci/venv && ~/.oci/venv/bin/pip install oci-cli   # Oracle's CLI
+  # Console → profile → API keys → Add API key; save the config preview as ~/.oci/config
+  caffeinate -i bash deploy/oracle/grab-vm.sh     # tries 2 OCPU/12 GB, then 1 OCPU/6 GB, every minute
+  ```
+  It creates the network if needed and prints `PUBLIC_IP=` when the VM is up.
 - **Idle reclamation**: Oracle may reclaim Always Free VMs that stay nearly idle for 7 days.
 - Both go away if you **upgrade to Pay As You Go** (needs a card; anything inside Always Free stays $0). Add a budget alert at the same time.
 
