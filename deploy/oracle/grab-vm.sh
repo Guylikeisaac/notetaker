@@ -83,7 +83,7 @@ while true; do
       echo "PUBLIC_IP=$IP"
       exit 0
     fi
-    if ! echo "$out" | grep -qiE "out of (host )?capacity|InternalError|TooManyRequests|NotAuthenticated"; then
+    if ! echo "$out" | grep -qiE "out of (host )?capacity|InternalError|TooManyRequests|NotAuthenticated|timed out|RequestException|Connection"; then
       echo "$(date '+%H:%M') round $attempt failed with an unexpected error:" >&2
       echo "$out" >&2
       exit 1
