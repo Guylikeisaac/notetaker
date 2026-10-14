@@ -12,6 +12,7 @@ import {
 import { generateFinalReport, generateLiveNotes } from "./ai";
 import { JoinError, MeetBot } from "./bot/meet";
 import { config } from "./config";
+import { recordingPath, setRecordingStatus, uploadRecording } from "./drive";
 import { log } from "./log";
 import { LiveTranscriber } from "./transcribe";
 
@@ -114,6 +115,17 @@ export async function runMeeting(meeting: Meeting): Promise<void> {
     });
     await transcriber.ready();
 
+    if (config.recording !== "off") {
+      try {
+        const mime = await meetBot.startRecording(recordingPath(meeting.id), config.recording);
+        await setRecordingStatus(meeting.id, "recording");
+        log.info("recording", { ...ctx, mime });
+      } catch (err) {
+        log.warn("recording failed to start", { ...ctx, err: String(err) });
+        await setRecordingStatus(meeting.id, "failed", "The recording could not be started.");
+      }
+    }
+
     notesTimer = setInterval(async () => {
       if (notesBusy || segmentCount === notedCount) return;
       notesBusy = true;
@@ -158,9 +170,22 @@ export async function runMeeting(meeting: Meeting): Promise<void> {
     clearInterval(audioStats);
   }
 
+  await meetBot.stopRecording();
   await meetBot.leave();
   await meetBot.close();
   await transcriber?.close();
   await writes;
-  await finalizeMeeting({ ...meeting, endedAt: new Date() });
+  const recorded = config.recording !== "off" && (await recordingStarted(meeting.id));
+  await Promise.all([
+    finalizeMeeting({ ...meeting, endedAt: new Date() }),
+    recorded ? uploadRecording(meeting.id) : null,
+  ]);
+}
+
+async function recordingStarted(meetingId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ recordingStatus: meetings.recordingStatus })
+    .from(meetings)
+    .where(eq(meetings.id, meetingId));
+  return row?.recordingStatus === "recording";
 }

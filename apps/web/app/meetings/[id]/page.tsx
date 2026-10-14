@@ -1,4 +1,4 @@
-import { asc, db, eq, transcriptSegments } from "@notetaker/db";
+import { asc, db, eq, transcriptSegments, type RecordingStatus } from "@notetaker/db";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LocalTime } from "@/components/local-time";
@@ -33,6 +33,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             {meeting.meetUrl.replace("https://", "")}
           </a>
         </p>
+        <Recording status={meeting.recordingStatus} url={meeting.recordingUrl} error={meeting.recordingError} />
       </div>
 
       <LiveMeeting
@@ -45,4 +46,24 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
       />
     </main>
   );
+}
+
+const RECORDING_COPY: Partial<Record<RecordingStatus, string>> = {
+  recording: "Recording in progress",
+  uploading: "Saving the recording to Google Drive…",
+};
+
+function Recording(props: { status: RecordingStatus | null; url: string | null; error: string | null }) {
+  if (!props.status) return null;
+  if (props.status === "uploaded" && props.url) {
+    return (
+      <p className="text-sm">
+        <a href={props.url} target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:underline dark:text-blue-400">
+          ▶ Watch the recording in Google Drive
+        </a>
+      </p>
+    );
+  }
+  const copy = RECORDING_COPY[props.status] ?? props.error ?? "The recording is unavailable.";
+  return <p className="text-sm text-zinc-500">{copy}</p>;
 }

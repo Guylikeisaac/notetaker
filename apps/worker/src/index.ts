@@ -2,6 +2,7 @@ import { and, db, eq, gt, inArray, lt, lte, meetings, transcriptSegments, type M
 import { syncAllCalendars } from "./calendar";
 import { checkAllInboxes } from "./gmail";
 import { config } from "./config";
+import { retryPendingUploads } from "./drive";
 import { log } from "./log";
 import { finalizeMeeting, requestShutdown, runMeeting } from "./session";
 
@@ -118,6 +119,9 @@ async function main(): Promise<void> {
   every(config.calendarSyncIntervalMs, "calendar sync", syncAllCalendars);
   every(config.inboxCheckIntervalMs, "inbox check", checkAllInboxes);
   every(config.schedulerIntervalMs, "scheduler", schedule);
+  if (config.recording !== "off") {
+    every(config.recordingUploadRetryMs, "recording upload retry", () => retryPendingUploads([...active.keys()]));
+  }
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
 }

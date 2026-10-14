@@ -43,6 +43,9 @@ export async function GET(req: NextRequest) {
   if (!tokens.scope?.includes("calendar.readonly") || !tokens.scope?.includes("gmail.readonly")) {
     return back(req, "Allow both calendar and email access so the bot can see its meeting invites.");
   }
+  if (!tokens.scope?.includes("drive.file")) {
+    return back(req, "Allow Google Drive access so the bot can save meeting recordings.");
+  }
 
   const infoRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
     headers: { authorization: `Bearer ${tokens.access_token}` },

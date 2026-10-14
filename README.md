@@ -25,6 +25,7 @@ packages/db   Drizzle schema + Postgres client + token encryption, shared by bot
 | 10 | AI notes update live | `session.ts` calls Gemini every ~45s when there's new speech and stores `meetings.notes` |
 | 11 | Meeting ends | Leave button disappears, host ends it, the bot is alone for 3 min, the user clicks **Make bot leave**, or 1h past the scheduled end |
 | 12 | Final report | `ai.ts` `generateFinalReport` (summary, topics, decisions, action items, next steps) → `meetings.report` |
+| 12b | Recording | `bot/audio-capture.ts` records the Meet tab (or call audio) with MediaRecorder → `drive.ts` uploads it to the bot's Google Drive folder *Notetaker recordings* and shares it with the inviter (`RECORDING=video\|audio\|off`) |
 | 13 | Saved in dashboard | `/dashboard` lists it under Past meetings; `/meetings/[id]` shows report + transcript |
 
 ## Company use
@@ -60,6 +61,7 @@ packages/db   Drizzle schema + Postgres client + token encryption, shared by bot
 ## Deploying
 
 **AWS EC2 step-by-step guide for the worker: [`deploy/aws/README.md`](deploy/aws/README.md).**
+**Oracle Cloud Always Free (ARM) guide: [`deploy/oracle/README.md`](deploy/oracle/README.md).**
 
 - **Web → Vercel.** Set the project root to `apps/web` and add `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, and `AUTH_SECRET`.
 - **Worker → any long-running container host** (Fly.io, Railway, ECS, a VM). Calls can last hours, and each bot holds a real Chrome process, so the worker can't run as a serverless function.

@@ -24,6 +24,14 @@ export const AUDIO_CAPTURE_SCRIPT = String.raw`
     console.log("[notetaker] using WebRTC track fallback", remoteStreams.length);
   };
 
+  function toBase64(bytes) {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  }
+
   function ensureGraph() {
     if (ctx) return;
     ctx = new AudioContext({ sampleRate: 16000 });
@@ -42,12 +50,7 @@ export const AUDIO_CAPTURE_SCRIPT = String.raw`
         const a = Math.abs(s);
         if (a > peak) peak = a;
       }
-      const bytes = new Uint8Array(pcm.buffer);
-      let bin = "";
-      for (let i = 0; i < bytes.length; i += 0x8000) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-      }
-      if (window.__notetakerAudio) window.__notetakerAudio(btoa(bin), peak);
+      if (window.__notetakerAudio) window.__notetakerAudio(toBase64(new Uint8Array(pcm.buffer)), peak);
     };
   }
 
@@ -73,19 +76,62 @@ export const AUDIO_CAPTURE_SCRIPT = String.raw`
   // Chrome auto-accepts via --auto-accept-this-tab-capture.
   window.__notetakerStartTabCapture = async () => {
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
+      // Only used for the recording; 720p at 15 fps keeps the encoder cheap.
+      video: { width: { max: 1280 }, height: { max: 720 }, frameRate: { max: 15 } },
       audio: { suppressLocalAudioPlayback: false, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       preferCurrentTab: true,
       selfBrowserSurface: "include",
     });
     const tracks = stream.getAudioTracks();
     if (tracks.length === 0) throw new Error("tab capture returned no audio track");
+    window.__notetakerTabStream = stream;
     ensureGraph();
     ctx.createMediaStreamSource(new MediaStream(tracks)).connect(mixer);
     if (ctx.state === "suspended") await ctx.resume();
     console.log("[notetaker] tab capture started, ctx", ctx.state);
     return "ok";
   };
+
+  // Recording: MediaRecorder on the tab capture (video mode) or on the mixed
+  // call audio (audio mode, or when tab capture failed). Chunks go to the
+  // worker through the exposed __notetakerRecording binding, in order.
+  let recorder = null;
+  let flushed = Promise.resolve();
+  window.__notetakerStartRecording = (mode) => {
+    if (recorder) return recorder.mimeType;
+    const tab = window.__notetakerTabStream;
+    let stream;
+    if (mode === "video" && tab && tab.getVideoTracks().some((t) => t.readyState === "live")) {
+      stream = tab;
+    } else {
+      ensureGraph();
+      const dest = ctx.createMediaStreamDestination();
+      mixer.connect(dest);
+      stream = dest.stream;
+    }
+    const video = stream.getVideoTracks().length > 0;
+    recorder = new MediaRecorder(stream, {
+      mimeType: video ? "video/webm;codecs=vp8,opus" : "audio/webm;codecs=opus",
+      videoBitsPerSecond: 600000,
+      audioBitsPerSecond: 64000,
+    });
+    recorder.ondataavailable = (e) => {
+      if (!e.data.size) return;
+      flushed = flushed
+        .then(async () => window.__notetakerRecording(toBase64(new Uint8Array(await e.data.arrayBuffer()))))
+        .catch((err) => console.log("[notetaker] recording chunk lost", String(err)));
+    };
+    recorder.start(5000);
+    console.log("[notetaker] recording started", recorder.mimeType);
+    return recorder.mimeType;
+  };
+  // Resolves once the final chunk has reached the worker.
+  window.__notetakerStopRecording = () =>
+    new Promise((resolve) => {
+      if (!recorder || recorder.state === "inactive") return flushed.then(() => resolve("inactive"));
+      recorder.onstop = () => setTimeout(() => flushed.then(() => resolve("stopped")), 0);
+      recorder.stop();
+    });
 
   console.log("[notetaker] capture installed");
   function Wrapped(...args) {

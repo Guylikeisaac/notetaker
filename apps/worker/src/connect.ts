@@ -62,14 +62,14 @@ const params = new URLSearchParams({
   client_id: clientId,
   redirect_uri: redirectUri,
   response_type: "code",
-  scope: "openid email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly",
+  scope: "openid email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file",
   access_type: "offline",
   prompt: "consent",
   login_hint: botEmail,
   state,
 });
 await page.goto(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
-console.log(`In the window that opened: continue as ${botEmail}, click Continue on the warning, and allow calendar access.`);
+console.log(`In the window that opened: continue as ${botEmail}, click Continue on the warning, and allow calendar, email and Drive access.`);
 
 try {
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -86,6 +86,7 @@ try {
   const tokens = (await tokenRes.json()) as { access_token?: string; refresh_token?: string; scope?: string; error?: string };
   if (!tokens.refresh_token || !tokens.access_token) throw new Error(`token exchange failed: ${tokens.error ?? "no refresh token"}`);
   if (!tokens.scope?.includes("calendar.readonly")) throw new Error("calendar access was not granted; tick the calendar box");
+  if (!tokens.scope?.includes("drive.file")) throw new Error("Drive access was not granted; tick the Google Drive box");
 
   const info = (await (
     await fetch("https://openidconnect.googleapis.com/v1/userinfo", {

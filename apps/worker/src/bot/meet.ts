@@ -1,5 +1,5 @@
 import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { createWriteStream, existsSync, type WriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
@@ -36,6 +36,7 @@ export class MeetBot {
   private page!: Page;
   private tempDir: string | null = null;
   private profileKey: string | null = null;
+  private recordingFile: WriteStream | null = null;
 
   constructor(
     private readonly meetUrl: string,
@@ -86,6 +87,10 @@ export class MeetBot {
         // Fallback if the picker still appears: pick the tab whose title contains "Meet".
         "--auto-select-tab-capture-source-by-title=Meet",
         "--auto-select-desktop-capture-source=Meet",
+        // Keep rendering (and so recording video) while the window is minimized or hidden.
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
       ],
       ignoreDefaultArgs: ["--mute-audio", "--enable-automation"],
     });
@@ -105,6 +110,9 @@ export class MeetBot {
     });
     await this.page.exposeFunction("__notetakerAudio", (b64: string, peak: number) => {
       this.onAudio(Buffer.from(b64, "base64"), peak);
+    });
+    await this.page.exposeFunction("__notetakerRecording", (b64: string) => {
+      this.recordingFile?.write(Buffer.from(b64, "base64"));
     });
     await this.page.addInitScript({ content: AUDIO_CAPTURE_SCRIPT });
     return { signedIn };
@@ -205,6 +213,39 @@ export class MeetBot {
     }
   }
 
+  /**
+   * Starts recording the call into `path` (WebM). Video mode falls back to
+   * audio-only when tab capture isn't available. Call after join().
+   */
+  async startRecording(path: string, mode: "video" | "audio"): Promise<string> {
+    await mkdir(dirname(path), { recursive: true });
+    this.recordingFile = createWriteStream(path);
+    try {
+      return (await this.page.evaluate(`window.__notetakerStartRecording(${JSON.stringify(mode)})`)) as string;
+    } catch (err) {
+      await this.closeRecordingFile();
+      throw err;
+    }
+  }
+
+  /** Flushes the recorder's last chunk to disk. Safe to call if recording never started. */
+  async stopRecording(): Promise<void> {
+    if (!this.recordingFile) return;
+    if (!this.page.isClosed()) {
+      await Promise.race([
+        this.page.evaluate("window.__notetakerStopRecording && window.__notetakerStopRecording()").catch(() => {}),
+        new Promise((r) => setTimeout(r, 15_000)),
+      ]);
+    }
+    await this.closeRecordingFile();
+  }
+
+  private async closeRecordingFile(): Promise<void> {
+    const file = this.recordingFile;
+    this.recordingFile = null;
+    if (file) await new Promise<void>((resolve) => file.end(resolve));
+  }
+
   /** Resolves when the call is over for the bot, for whatever reason. */
   async waitForEnd(opts: { endsAt: Date; shouldStop: () => Promise<boolean> }): Promise<EndReason> {
     const leave = this.page.locator(UI.leaveButton);
@@ -250,6 +291,7 @@ export class MeetBot {
   }
 
   async close(): Promise<void> {
+    await this.closeRecordingFile();
     await this.context?.close().catch((err) => log.warn("browser close failed", { err: String(err) }));
     if (this.profileKey) inUseProfiles.delete(this.profileKey);
     if (this.tempDir) await rm(this.tempDir, { recursive: true, force: true }).catch(() => {});

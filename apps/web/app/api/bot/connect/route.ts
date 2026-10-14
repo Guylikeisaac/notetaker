@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     client_id: process.env.GOOGLE_CLIENT_ID!,
     redirect_uri: new URL("/api/bot/callback", req.url).toString(),
     response_type: "code",
-    scope: "openid email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly",
+    scope: "openid email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file",
     access_type: "offline",
     prompt: "consent select_account",
     include_granted_scopes: "true",

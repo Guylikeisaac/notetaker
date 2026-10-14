@@ -47,6 +47,16 @@ export const meetingStatus = pgEnum("meeting_status", [
 
 export type MeetingStatus = (typeof meetingStatus.enumValues)[number];
 
+export const recordingStatus = pgEnum("recording_status", [
+  "recording", // MediaRecorder is writing to a local file on the worker
+  "uploading", // call over, sending the file to the bot's Google Drive
+  "uploaded",
+  "upload_failed", // file kept on the worker; retried periodically
+  "failed", // recording never started or the file was lost
+]);
+
+export type RecordingStatus = (typeof recordingStatus.enumValues)[number];
+
 export type LiveNotes = {
   summary: string;
   keyPoints: string[];
@@ -80,6 +90,10 @@ export const meetings = pgTable(
     endedAt: timestamp("ended_at", { withTimezone: true }),
     notes: jsonb("notes").$type<LiveNotes>(),
     report: jsonb("report").$type<FinalReport>(),
+    recordingStatus: recordingStatus("recording_status"),
+    recordingFileId: text("recording_file_id"),
+    recordingUrl: text("recording_url"),
+    recordingError: text("recording_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

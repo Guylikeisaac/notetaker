@@ -4,8 +4,9 @@ FROM mcr.microsoft.com/playwright:v1.63.0-noble
 
 # pulseaudio: a virtual sound card, so Chrome actually renders call audio for capture.
 # x11vnc: lets an admin see the virtual screen once, to sign the bot into Google.
+# ffmpeg: remuxes recordings so they have a duration and seek index in Drive.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends pulseaudio x11vnc \
+ && apt-get install -y --no-install-recommends pulseaudio x11vnc ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

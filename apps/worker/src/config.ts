@@ -1,11 +1,17 @@
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} is not set`);
   return v;
 }
+
+// Persistent Chrome profiles, one per bot email, created by `pnpm bot:login`.
+const profilesDir = process.env.BOT_PROFILES_DIR ?? join(process.cwd(), ".bot-profiles");
+
+const recording = process.env.RECORDING ?? "video";
+if (!["video", "audio", "off"].includes(recording)) throw new Error("RECORDING must be video, audio or off");
 
 export const config = {
   workerId: process.env.WORKER_ID ?? `${hostname()}-${process.pid}`,
@@ -16,10 +22,16 @@ export const config = {
   liveNotesModel: process.env.LIVE_NOTES_MODEL ?? "gemini-2.5-flash",
   reportModel: process.env.REPORT_MODEL ?? "gemini-2.5-flash",
 
-  // Persistent Chrome profiles, one per bot email, created by `pnpm bot:login`.
-  profilesDir: process.env.BOT_PROFILES_DIR ?? join(process.cwd(), ".bot-profiles"),
+  profilesDir,
   botDisplayName: process.env.BOT_DISPLAY_NAME ?? "Notetaker",
   headless: process.env.BOT_HEADLESS !== "false",
+
+  // video = the Meet tab as the bot sees it; audio = call audio only.
+  // Either way the file is uploaded to the bot's Google Drive after the call.
+  recording: recording as "video" | "audio" | "off",
+  // Local staging for recordings until they reach Drive.
+  recordingsDir: process.env.RECORDINGS_DIR ?? join(dirname(profilesDir), "recordings"),
+  recordingUploadRetryMs: 10 * 60_000,
 
   maxConcurrentBots: Number(process.env.MAX_CONCURRENT_BOTS ?? 3),
   calendarSyncIntervalMs: 60_000,
