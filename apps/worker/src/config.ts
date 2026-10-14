@@ -37,6 +37,7 @@ export const config = {
   calendarSyncIntervalMs: 60_000,
   inboxCheckIntervalMs: 20_000,
   schedulerIntervalMs: 15_000,
+  heartbeatIntervalMs: 30_000,
   joinLeadMs: 60_000, // launch this long before the event starts
   admissionTimeoutMs: 10 * 60_000,
   aloneTimeoutMs: 3 * 60_000, // leave after being the only participant this long

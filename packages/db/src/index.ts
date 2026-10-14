@@ -11,9 +11,10 @@ const globalForDb = globalThis as unknown as { __notetakerSql?: postgres.Sql };
 // dead sockets in the pool.
 // prepare: false so it also works through transaction-mode poolers (Supabase
 // port 6543, used by the serverless web app), which can't keep prepared statements.
+// DATABASE_POOL_MAX caps connections per process (Supabase's free tier allows few).
 const sql =
   globalForDb.__notetakerSql ??
-  postgres(url, { max: 10, idle_timeout: 20, max_lifetime: 30 * 60, connect_timeout: 15, prepare: false });
+  postgres(url, { max: Number(process.env.DATABASE_POOL_MAX ?? 10), idle_timeout: 20, max_lifetime: 30 * 60, connect_timeout: 15, prepare: false });
 if (process.env.NODE_ENV !== "production") globalForDb.__notetakerSql = sql;
 
 export const db = drizzle(sql, { schema });

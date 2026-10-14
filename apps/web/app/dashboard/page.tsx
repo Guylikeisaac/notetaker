@@ -1,4 +1,4 @@
-import { and, botAccounts, canSeeMeeting, db, desc, gte, inArray, meetings, type Meeting } from "@notetaker/db";
+import { and, botAccounts, canSeeMeeting, db, desc, gte, inArray, meetings, workers, type Meeting } from "@notetaker/db";
 import Link from "next/link";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LocalTime } from "@/components/local-time";
@@ -9,6 +9,8 @@ import { disconnectBot, restoreMeeting, sendBotNow, signOutAction, stopBot } fro
 export const dynamic = "force-dynamic";
 
 const LIVE = ["joining", "waiting_admission", "in_call", "processing"] as const;
+// Workers check in every 30s; allow for a couple of missed beats.
+const WORKER_STALE_MS = 90_000;
 
 function Step({ n, done, title, children }: { n: number; done: boolean; title: string; children?: React.ReactNode }) {
   return (
@@ -38,6 +40,11 @@ function MeetingRow({ m, action }: { m: Meeting; action?: React.ReactNode }) {
         </p>
       </Link>
       <div className="flex shrink-0 items-center gap-3">
+        {m.recordingStatus === "uploaded" && (
+          <Link href={`/meetings/${m.id}#recording`} className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">
+            ▶ Recording
+          </Link>
+        )}
         <StatusBadge status={m.status} />
         {action}
       </div>
@@ -75,7 +82,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   // One company-wide bot.
   const [bot] = await db.select().from(botAccounts).limit(1);
   const now = new Date();
-  const [live, upcoming, past] = await Promise.all([
+  const [live, upcoming, past, online] = await Promise.all([
     db.select().from(meetings)
       .where(and(mine, inArray(meetings.status, [...LIVE])))
       .orderBy(meetings.startsAt),
@@ -87,6 +94,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       .where(and(mine, inArray(meetings.status, ["completed", "failed"])))
       .orderBy(desc(meetings.startsAt))
       .limit(50),
+    // null until the bot has started once and created the table.
+    db.select().from(workers).where(gte(workers.lastSeenAt, new Date(now.getTime() - WORKER_STALE_MS))).catch(() => null),
   ]);
 
   const hasMeetings = live.length + upcoming.length + past.length > 0;
@@ -144,7 +153,21 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               <p>An admin hasn't connected the company bot yet.</p>
             )}
           </Step>
-          <Step n={3} done={hasMeetings} title="Invite the bot to a Google Meet">
+          <Step n={3} done={!!online?.length} title={online?.length ? "Bot server online" : "Bot server offline"}>
+            {online?.length ? (
+              <p>
+                {online
+                  .map((w) => `${w.id}: ${w.activeMeetings} of ${w.maxMeetings} meeting${w.maxMeetings === 1 ? "" : "s"} in progress`)
+                  .join(" · ")}
+              </p>
+            ) : (
+              <p className="text-red-600">
+                Nothing is running to join meetings, so invited meetings will be missed. Start the bot on the Oracle server
+                (<code>docker compose up -d</code> in <code>deploy/oracle</code>).
+              </p>
+            )}
+          </Step>
+          <Step n={4} done={hasMeetings} title="Invite the bot to a Google Meet">
             {bot ? (
               <p>
                 Add <span className="font-medium text-zinc-900 dark:text-zinc-100">{bot.email}</span> as a guest on any

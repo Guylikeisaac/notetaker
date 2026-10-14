@@ -133,7 +133,19 @@ export const transcriptSegments = pgTable(
   (t) => [index("segments_meeting_idx").on(t.meetingId, t.id)],
 );
 
+// Each running bot worker (Oracle VM, a laptop) checks in here every 30s, so
+// the dashboard can tell whether anything is around to join meetings.
+export const workers = pgTable("workers", {
+  id: text("id").primaryKey(), // WORKER_ID
+  host: text("host").notNull(),
+  activeMeetings: integer("active_meetings").notNull().default(0),
+  maxMeetings: integer("max_meetings").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type BotAccount = typeof botAccounts.$inferSelect;
 export type Meeting = typeof meetings.$inferSelect;
 export type TranscriptSegment = typeof transcriptSegments.$inferSelect;
+export type Worker = typeof workers.$inferSelect;

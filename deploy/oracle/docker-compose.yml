@@ -1,6 +1,7 @@
 # The meeting bot on an Oracle Cloud Always Free VM (Ampere A1, arm64).
 # The website runs on Vercel and the database on Supabase; see README.md.
 #
+# From the Mac, `sh deploy/oracle/deploy.sh ubuntu@<vm-ip>` copies the code and runs this.
 # Run from this folder on the server:
 #   docker compose up -d --build                    start / update the bot
 #   docker compose --profile login run --rm --service-ports login   one-time Google sign-in for the bot
@@ -26,6 +27,7 @@ services:
     restart: always
     environment:
       WORKER_ID: oracle-1
+      WORKER_HOST: oracle-vm # shown on the dashboard's "Bot server" line
       TZ: Asia/Kolkata # recording file names use local time
     volumes:
       # Signed-in Google profile and not-yet-uploaded recordings survive restarts and updates.

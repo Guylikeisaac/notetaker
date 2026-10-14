@@ -1,4 +1,5 @@
-import { and, db, eq, gt, inArray, lt, lte, meetings, transcriptSegments, type Meeting } from "@notetaker/db";
+import { hostname } from "node:os";
+import { and, db, eq, gt, inArray, lt, lte, meetings, transcriptSegments, workers, type Meeting } from "@notetaker/db";
 import { syncAllCalendars } from "./calendar";
 import { checkAllInboxes } from "./gmail";
 import { config } from "./config";
@@ -8,6 +9,19 @@ import { finalizeMeeting, requestShutdown, runMeeting } from "./session";
 
 const active = new Map<string, Promise<void>>();
 let stopping = false;
+const startedAt = new Date();
+
+/** Tells the dashboard this worker is alive and how busy it is. */
+async function heartbeat(): Promise<void> {
+  const row = {
+    host: process.env.WORKER_HOST ?? hostname(),
+    activeMeetings: active.size,
+    maxMeetings: config.maxConcurrentBots,
+    startedAt,
+    lastSeenAt: new Date(),
+  };
+  await db.insert(workers).values({ id: config.workerId, ...row }).onConflictDoUpdate({ target: workers.id, set: row });
+}
 
 /** Meetings this worker was handling when it last died. */
 async function recoverOrphans(): Promise<void> {
@@ -106,6 +120,7 @@ async function shutdown(signal: string): Promise<void> {
   log.info("shutting down; leaving active calls", { signal, active: active.size });
   requestShutdown();
   await Promise.allSettled(active.values());
+  await db.delete(workers).where(eq(workers.id, config.workerId)).catch(() => {});
   process.exit(0);
 }
 
@@ -116,6 +131,7 @@ process.on("uncaughtException", (err) => log.error("uncaught exception", { err: 
 async function main(): Promise<void> {
   log.info("worker starting", { workerId: config.workerId, maxConcurrentBots: config.maxConcurrentBots });
   await recoverOrphans();
+  every(config.heartbeatIntervalMs, "heartbeat", heartbeat);
   every(config.calendarSyncIntervalMs, "calendar sync", syncAllCalendars);
   every(config.inboxCheckIntervalMs, "inbox check", checkAllInboxes);
   every(config.schedulerIntervalMs, "scheduler", schedule);
