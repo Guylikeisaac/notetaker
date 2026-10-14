@@ -33,7 +33,12 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             {meeting.meetUrl.replace("https://", "")}
           </a>
         </p>
-        <Recording status={meeting.recordingStatus} url={meeting.recordingUrl} error={meeting.recordingError} />
+        <Recording
+          meetingId={meeting.id}
+          status={meeting.recordingStatus}
+          url={meeting.recordingUrl}
+          error={meeting.recordingError}
+        />
       </div>
 
       <LiveMeeting
@@ -53,15 +58,23 @@ const RECORDING_COPY: Partial<Record<RecordingStatus, string>> = {
   uploading: "Saving the recording to Google Drive…",
 };
 
-function Recording(props: { status: RecordingStatus | null; url: string | null; error: string | null }) {
+function Recording(props: { meetingId: string; status: RecordingStatus | null; url: string | null; error: string | null }) {
   if (!props.status) return null;
-  if (props.status === "uploaded" && props.url) {
+  if (props.status === "uploaded") {
     return (
-      <p className="text-sm">
-        <a href={props.url} target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:underline dark:text-blue-400">
-          ▶ Watch the recording in Google Drive
-        </a>
-      </p>
+      <div id="recording" className="space-y-2 pt-3">
+        <video
+          controls
+          preload="metadata"
+          src={`/api/meetings/${props.meetingId}/recording`}
+          className="aspect-video w-full max-w-3xl rounded-xl border border-zinc-200 bg-black dark:border-zinc-800"
+        />
+        {props.url && (
+          <a href={props.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline dark:text-blue-400">
+            Open in Google Drive
+          </a>
+        )}
+      </div>
     );
   }
   const copy = RECORDING_COPY[props.status] ?? props.error ?? "The recording is unavailable.";

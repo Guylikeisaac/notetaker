@@ -2,7 +2,7 @@
 
 | Piece | Where | Cost |
 |---|---|---|
-| Website | **Vercel**, https://syncup-notetaker.vercel.app | free (Hobby) |
+| Website | **Vercel**, https://notetaker-nu-lac.vercel.app | free (Hobby) |
 | Database | **Supabase** Postgres (500 MB, always on) | free |
 | Meeting bot | **Oracle Cloud** Always Free VM (Ampere A1) | free |
 | Recordings | the bot account's Google Drive | free (Drive storage) |
@@ -38,8 +38,8 @@ vercel deploy --prod
 ```
 
 On the Google OAuth client, add both redirect URIs:
-- `https://syncup-notetaker.vercel.app/api/auth/callback/google`
-- `https://syncup-notetaker.vercel.app/api/bot/callback`
+- `https://notetaker-nu-lac.vercel.app/api/auth/callback/google`
+- `https://notetaker-nu-lac.vercel.app/api/bot/callback`
 
 For auto-deploys on every push, connect the Git repo under Vercel → Project → Settings → Git (`ayushsyncup/notetaker`).
 
@@ -60,38 +60,23 @@ Oracle console → **Compute → Instances → Create instance**:
 - **Idle reclamation**: Oracle may reclaim Always Free VMs that stay nearly idle for 7 days.
 - Both go away if you **upgrade to Pay As You Go** (needs a card; anything inside Always Free stays $0). Add a budget alert at the same time.
 
-### Server setup
+### Ship the bot from your Mac
 
-The repo is private, so give the server a read-only deploy key:
-
-```sh
-ssh ubuntu@<vm-ip>
-ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub
-```
-
-Add the printed key at GitHub → `ayushsyncup/notetaker` → **Settings → Deploy keys** (read-only), then:
+One command copies the code and `.env` to the VM, installs Docker the first time, builds and
+starts the bot. The server never needs access to GitHub.
 
 ```sh
-git clone git@github.com:ayushsyncup/notetaker.git
-sh ~/notetaker/deploy/oracle/setup.sh    # installs Docker
-exit                                     # log out and back in
+cd ~/notetaker
+sh deploy/oracle/deploy.sh ubuntu@<vm-ip>    # first ARM build takes ~10 minutes
 ```
 
-From your Mac, copy the settings:
+It uses `~/.ssh/oracle_notetaker` if that key exists (or `SSH_KEY=/path/to/key`). Run the same
+command again after every change: it replaces the code on the server, applies database changes
+and restarts the bot. The signed-in Google profile and unsent recordings live in a Docker volume,
+so they survive.
 
-```sh
-scp ~/notetaker/.env ubuntu@<vm-ip>:~/notetaker/.env
-ssh ubuntu@<vm-ip> chmod 600 notetaker/.env
-```
-
-### Start the bot
-
-```sh
-ssh ubuntu@<vm-ip>
-cd ~/notetaker/deploy/oracle
-docker compose up -d --build     # first ARM build takes ~10 minutes
-docker compose logs -f worker    # expect "worker starting"; Ctrl+C stops watching
-```
+Within 30 seconds the dashboard's **Bot server** step turns green (`oracle-1`). From then on
+your laptop can be off.
 
 ### Sign the bot into Google (one time)
 
@@ -108,7 +93,7 @@ the bot account. When the Meet home page appears, press **Ctrl+C**. You'll see `
 
 ## 4. Connect the bot
 
-Sign in at https://syncup-notetaker.vercel.app as an admin → **Connect bot account** → choose the
+Sign in at https://notetaker-nu-lac.vercel.app as an admin → **Connect bot account** → choose the
 bot account → allow Calendar, Gmail and **Google Drive**. Then invite the bot's email to a Meet
 starting in a couple of minutes.
 
@@ -117,15 +102,15 @@ with the VM for meetings. That's safe, but confusing. Stop one of them.
 
 ## Everyday commands
 
+Update the bot from the Mac: `sh deploy/oracle/deploy.sh ubuntu@<vm-ip>` (also applies database changes and a changed `.env`).
+
 On the VM, in `~/notetaker/deploy/oracle`:
 
 | Task | Command |
 |---|---|
 | Logs | `docker compose logs -f worker` |
-| Update the bot | `git pull && docker compose up -d --build` (also applies database changes) |
 | Restart | `docker compose restart worker` |
 | Stop | `docker compose down` (sign-in and pending recordings are kept) |
-| Changed `.env` | copy it again, then `docker compose up -d` |
 
 Website: `vercel deploy --prod` (or push, once Git is connected). After changing website
 settings in `.env`, run `sh deploy/vercel-env.sh` first.
@@ -133,7 +118,10 @@ settings in `.env`, run `sh deploy/vercel-env.sh` first.
 ## Recordings
 
 - Saved as WebM in the bot's Drive, folder **Notetaker recordings**, and shared view-only
-  (no email) with whoever invited the bot. The meeting page links to it.
+  (no email) with whoever invited the bot.
+- Watch it on the meeting page: the website streams it from Drive with the bot's token, so it
+  plays for anyone who can see the meeting, without Drive access. Past meetings with a
+  recording show **▶ Recording** on the dashboard.
 - `RECORDING=video` is about 300 MB per meeting-hour; `audio` about 30 MB; `off` disables it.
 - Failed uploads stay on the VM and are retried every 10 minutes.
 
@@ -146,7 +134,7 @@ settings in `.env`, run `sh deploy/vercel-env.sh` first.
 ## Troubleshooting
 
 - **`redirect_uri_mismatch`**: the two URIs in step 2 must be on the OAuth client exactly.
-- **Website 500 errors**: `vercel logs syncup-notetaker.vercel.app`. Usually a missing env var; re-run `deploy/vercel-env.sh` and redeploy.
+- **Website 500 errors**: `vercel logs notetaker-nu-lac.vercel.app`. Usually a missing env var; re-run `deploy/vercel-env.sh` and redeploy.
 - **`calendar sync failed ... invalid_grant`**: reconnect the bot from the dashboard.
 - **`recording upload failed ... insufficient`**: reconnect the bot and tick Google Drive.
 - **Transcript stays empty**: `docker compose logs worker | grep -E "tab capture|unmuted|audio"`.
