@@ -10,8 +10,9 @@ import { AUDIO_CAPTURE_SCRIPT } from "./audio-capture";
 // Everything that depends on Meet's UI copy lives here. Meet changes its
 // markup often; when joining breaks, this block is the first place to look.
 const UI = {
-  joinNow: /^(join now|join)$/i,
-  askToJoin: /^ask to join$/i,
+  // Without a mic or camera Meet labels these "Join now without microphone and camera".
+  joinNow: /^(join now|join)( without (microphone and camera|mic and camera))?$/i,
+  askToJoin: /^ask to join( without (microphone and camera|mic and camera))?$/i,
   continueWithoutDevices: /continue without (microphone and camera|mic and camera)/i,
   dismiss: /^(got it|dismiss|close)$/i,
   nameInput: 'input[aria-label="Your name"], input[placeholder="Your name"]',
