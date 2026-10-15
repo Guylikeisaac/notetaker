@@ -20,7 +20,7 @@ if grep -q "FILL_ME" .env; then
 fi
 
 KEY="${SSH_KEY:-$HOME/.ssh/oracle_notetaker}"
-SSH="ssh -o StrictHostKeyChecking=accept-new"
+SSH="ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30"
 [ -f "$KEY" ] && SSH="$SSH -i $KEY"
 
 echo "→ copying code to $TARGET:~/notetaker"
