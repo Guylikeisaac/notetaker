@@ -2,7 +2,7 @@
 
 import { formatWhen } from "@/lib/format";
 
-/** Renders in the viewer's timezone; the server render is replaced on hydration. */
+/** Renders in the company timezone (India by default; see TIME_ZONE). */
 export function LocalTime({ iso }: { iso: string }) {
   return (
     <time dateTime={iso} suppressHydrationWarning>

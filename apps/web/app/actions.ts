@@ -1,6 +1,6 @@
 "use server";
 
-import { and, botAccounts, canSeeMeeting, db, eq, inArray, meetings, setAttendees } from "@notetaker/db";
+import { and, botAccounts, canSeeMeeting, db, eq, gt, inArray, meetingAttendees, meetings, setAttendees } from "@notetaker/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
@@ -61,14 +61,34 @@ export async function sendBotNow(formData: FormData) {
   const [bot] = await db.select({ id: botAccounts.id }).from(botAccounts).limit(1);
   if (!bot) redirect("/dashboard?bot_error=" + encodeURIComponent("The company bot isn't connected yet. Ask an admin."));
 
+  const meetUrl = `https://meet.google.com/${match[1].toLowerCase()}`;
   const now = new Date();
+
+  // Already headed to (or in) this call, e.g. from the calendar invite: share
+  // that meeting with this user instead of sending the bot in twice.
+  const [existing] = await db
+    .select({ id: meetings.id })
+    .from(meetings)
+    .where(
+      and(
+        eq(meetings.meetUrl, meetUrl),
+        inArray(meetings.status, ["scheduled", "joining", "waiting_admission", "in_call"]),
+        gt(meetings.endsAt, now),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    await db.insert(meetingAttendees).values({ meetingId: existing.id, email: user.email.toLowerCase() }).onConflictDoNothing();
+    redirect(`/meetings/${existing.id}`);
+  }
+
   const [m] = await db
     .insert(meetings)
     .values({
       userId: user.id,
       calendarEventId: `manual-${crypto.randomUUID()}`,
       title: String(formData.get("title") || "").trim() || `Meet ${match[1].toLowerCase()}`,
-      meetUrl: `https://meet.google.com/${match[1].toLowerCase()}`,
+      meetUrl,
       startsAt: now,
       endsAt: new Date(now.getTime() + 2 * 60 * 60_000),
     })

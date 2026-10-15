@@ -99,10 +99,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   ]);
 
   const hasMeetings = live.length + upcoming.length + past.length > 0;
+  // Refresh quickly while something is happening or about to, so statuses feel live.
+  const busy =
+    live.length > 0 ||
+    upcoming.some((m) => m.status === "scheduled" && m.startsAt.getTime() - now.getTime() < 5 * 60_000);
 
   return (
     <main className="mx-auto max-w-3xl space-y-10 px-6 py-10">
-      <AutoRefresh everyMs={15_000} />
+      <AutoRefresh everyMs={busy ? 5_000 : 15_000} />
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Notetaker</h1>
         <form action={signOutAction} className="flex items-center gap-3 text-sm text-zinc-500">

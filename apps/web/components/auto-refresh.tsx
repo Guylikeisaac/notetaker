@@ -10,7 +10,13 @@ export function AutoRefresh({ everyMs }: { everyMs: number }) {
     const t = setInterval(() => {
       if (document.visibilityState === "visible") router.refresh();
     }, everyMs);
-    return () => clearInterval(t);
+    // Catch up immediately when the tab comes back into view.
+    const onVisible = () => document.visibilityState === "visible" && router.refresh();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [router, everyMs]);
   return null;
 }
